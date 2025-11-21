@@ -14,25 +14,24 @@ import pytz
 import logging
 
 # =============================================================
-# 🔥 CONFIGURAÇÃO GERAL & AMBIENTE
+# 🔥 CONFIGURAÇÃO GERAL
 # =============================================================
 SERVICE_ACCOUNT_FILE = 'serviceAccountKey.json'
 DATABASE_URL = 'https://history-dashboard-a70ee-default-rtdb.firebaseio.com'
 URL_DO_SITE = "https://www.goathbet.com"
 LINK_AVIATOR = "https://www.goathbet.com/pt/casino/spribe/aviator"
 
-# Configuração de Logs
+# Configuração de Logs para limpar o console
 logging.getLogger('WDM').setLevel(logging.ERROR)
 os.environ['WDM_LOG_LEVEL'] = '0'
 
-# Credenciais
+# Credenciais do ambiente
 EMAIL = os.getenv("EMAIL")
 PASSWORD = os.getenv("PASSWORD")
 TZ_BR = pytz.timezone("America/Sao_Paulo")
 
-# ⚡ CONFIGURAÇÕES DE VELOCIDADE (TURBO)
-POLLING_INTERVAL = 0.1          # 10 checagens por segundo
-INTERVALO_MINIMO_ENVIO = 0.1    # Envio imediato
+# ⚡ CONFIGURAÇÕES TURBO
+POLLING_INTERVAL = 0.1          # Leitura ultra-rápida
 TEMPO_MAX_INATIVIDADE = 360     # 6 minutos
 
 # =============================================================
@@ -45,40 +44,33 @@ try:
     print("✅ Firebase conectado.")
 except Exception as e:
     print(f"❌ ERRO FIREBASE: {e}")
-    # Em produção, talvez queira exit() aqui se o firebase for crucial
 
 # =============================================================
-# 🛠️ FUNÇÕES DE NAVEGAÇÃO E DRIVER
+# 🛠️ DRIVER E NAVEGAÇÃO
 # =============================================================
 def start_driver():
-    """
-    Configuração Híbrida:
-    - Opções Headless (para servidor/cloud do arquivo antigo)
-    - Opções de Performance (Eager/Logs do arquivo novo)
-    """
+    """Configuração otimizada para Servidor (Headless) + Performance"""
     options = webdriver.ChromeOptions()
     
-    # --- Otimizações de Performance (Do novo script) ---
-    options.page_load_strategy = 'eager' 
-    options.add_argument("--log-level=3")
-    options.add_argument("--silent")
-    
-    # --- Configurações de Servidor/Headless (Do script antigo) ---
+    # Opções de Servidor (Essenciais para Square Cloud)
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
-    options.add_argument("--disable-extensions")
-    options.add_argument("--disable-popup-blocking")
-    options.add_argument("--headless")  # Mantenha headless para servidor
+    options.add_argument("--headless") 
+    options.add_argument("--disable-gpu")
     options.add_argument("--window-size=1920,1080")
     
-    # Tenta usar o ChromeDriverManager (mais compatível). 
-    # Se seu servidor exigir caminho fixo, altere service=...
+    # Opções de Performance
+    options.page_load_strategy = 'eager'
+    options.add_argument("--log-level=3")
+    options.add_argument("--silent")
+    options.add_argument("--disable-popup-blocking")
+
     try:
+        # Tenta instalar driver automaticamente
         return webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
     except:
-        # Fallback para caminho fixo comum em VPS linux (se o manager falhar)
-        service = Service("/usr/lib/chromium-browser/chromedriver")
-        return webdriver.Chrome(service=service, options=options)
+        # Fallback para caminho linux padrão
+        return webdriver.Chrome(service=Service("/usr/bin/chromedriver"), options=options)
 
 def safe_click(driver, by, value, timeout=5):
     try:
@@ -89,125 +81,117 @@ def safe_click(driver, by, value, timeout=5):
         return False
 
 def check_blocking_modals(driver):
-    """Fecha modais críticos (+18 e Cookies) - Lógica atualizada"""
+    """Fecha popups de +18 e Cookies que bloqueiam o clique"""
     try:
-        xpath_18 = [
+        # Botões de confirmação de idade
+        xpaths = [
             "//button[contains(., 'Sim')]", 
-            "//div[contains(text(), '18 anos')]/..//button[contains(., 'Sim')]",
-            "//button[contains(@class, 'MuiButton') and contains(., 'Sim')]",
-            "//button[@data-age-action='yes']"
+            "//button[@data-age-action='yes']",
+            "//div[contains(text(), '18')]/following::button[1]"
         ]
-        for xpath in xpath_18:
-            if safe_click(driver, By.XPATH, xpath, 1):
-                sleep(0.5)
-                break
-        safe_click(driver, By.XPATH, "//button[contains(., 'Aceitar todos')]", 1)
+        for xp in xpaths:
+            if safe_click(driver, By.XPATH, xp, 1): break
+        
+        # Aceitar cookies
         safe_click(driver, By.XPATH, "//button[contains(., 'Aceitar')]", 1)
     except: pass
 
 def process_login(driver):
-    print("➡️ Executando login (Fluxo Atualizado)...")
+    print("➡️ Iniciando login (V5.1)...")
     try:
         driver.get(URL_DO_SITE)
     except TimeoutException: pass
     
-    sleep(3)
+    sleep(2)
     check_blocking_modals(driver)
 
-    # Tenta abrir modal de login
-    print("ℹ️ Tentando abrir modal de login...")
-    if safe_click(driver, By.CSS_SELECTOR, 'button[aria-label="Entrar"]', 5) or \
-       safe_click(driver, By.XPATH, "//button[contains(., 'Entrar')]", 5) or \
-       safe_click(driver, By.CSS_SELECTOR, 'a[data-ix="window-login"]', 5):
-        
+    # --- CORREÇÃO DO ERRO DE LOGIN AQUI ---
+    # Tenta múltiplos seletores para o botão "Entrar"
+    login_clicked = False
+    if safe_click(driver, By.XPATH, "//button[contains(., 'Entrar')]", 5):
+        login_clicked = True
+    elif safe_click(driver, By.CSS_SELECTOR, 'a[href*="login"]', 5):
+        login_clicked = True
+    elif safe_click(driver, By.XPATH, "//div[contains(text(), 'Entrar')]", 5):
+        login_clicked = True
+
+    if login_clicked:
+        print("ℹ️ Modal de login aberto.")
         sleep(1)
         try:
-            # Tenta preencher campos (suporta ID antigo e NAME novo)
-            email_field = None
-            try: email_field = driver.find_element(By.NAME, "email")
-            except: email_field = driver.find_element(By.ID, "field-15") # ID antigo
+            # Preenche campos (Tenta ID antigo e NAME novo)
+            try: driver.find_element(By.NAME, "email").send_keys(EMAIL)
+            except: driver.find_element(By.CSS_SELECTOR, "input[type='email']").send_keys(EMAIL)
             
-            pass_field = None
-            try: pass_field = driver.find_element(By.NAME, "password")
-            except: pass_field = driver.find_element(By.ID, "password-login") # ID antigo
+            try: driver.find_element(By.NAME, "password").send_keys(PASSWORD)
+            except: driver.find_element(By.CSS_SELECTOR, "input[type='password']").send_keys(PASSWORD)
 
-            if email_field and pass_field:
-                email_field.send_keys(EMAIL)
-                pass_field.send_keys(PASSWORD)
-                
-                # Botão de envio
-                if safe_click(driver, By.CSS_SELECTOR, "button[type='submit']", 4) or \
-                   safe_click(driver, By.CSS_SELECTOR, "a[login-btn]", 4):
-                    print("✅ Login enviado.")
-                    sleep(5)
-            check_blocking_modals(driver)
+            # Botão confirmar
+            if safe_click(driver, By.CSS_SELECTOR, "button[type='submit']", 4) or \
+               safe_click(driver, By.XPATH, "//button[contains(., 'Entrar')]", 4):
+                print("✅ Credenciais enviadas.")
+                sleep(5)
         except Exception as e:
-            print(f"⚠️ Erro no preenchimento: {e}")
-    
-    print("ℹ️ Navegando direto para Aviator Spribe...")
+            print(f"⚠️ Falha ao preencher: {e}")
+    else:
+        print("⚠️ Botão de login não encontrado ou já logado. Seguindo...")
+
+    print("➡️ Navegando para Aviator...")
     driver.get(LINK_AVIATOR)
     
-    # Aguarda iframe carregar
+    # Aguarda carregamento do iframe
     try:
         WebDriverWait(driver, 20).until(
             EC.presence_of_element_located((By.XPATH, '//iframe[contains(@src, "spribe")]'))
         )
     except:
-        print("⚠️ Timeout aguardando iframe principal.")
+        print("⚠️ Alerta: Iframe demorou a carregar.")
         
     check_blocking_modals(driver)
     return True
 
 def initialize_game_elements(driver):
-    """
-    Localiza elementos com PRIORIDADE ATUALIZADA.
-    Prioridade 1: Spribe / .payouts-block
-    """
+    """Busca elementos com prioridade no SPRIBE"""
     
-    # ORDEM DE PRIORIDADE ALTERADA CONFORME SOLICITADO
+    # PRIORIDADE MÁXIMA: SPRIBE
     POSSIVEIS_IFRAMES = [
-        '//iframe[contains(@src, "spribe")]',        # Prioridade Máxima
+        '//iframe[contains(@src, "spribe")]',
         '//iframe[contains(@src, "/aviator/")]',
-        '//iframe[contains(@src, "game?token")]',
-        # Antigo como fallback final
-        '//iframe[contains(translate(@src,"ABCDEFGHIJKLMNOPQRSTUVWXYZ","abcdefghijklmnopqrstuvwxyz"),"salsagator")]'
+        '//iframe[contains(@src, "game?token")]'
     ]
     
     POSSIVEIS_HISTORICOS = [
-        ('.payouts-block', By.CSS_SELECTOR),         # Prioridade Máxima
-        ('div.payouts-block', By.CSS_SELECTOR),
-        ('.rounds-history', By.CSS_SELECTOR),
-        ('[data-testid="history"]', By.CSS_SELECTOR),
-        ('.multipliers-history', By.CSS_SELECTOR)
+        ('.payouts-block', By.CSS_SELECTOR),  # Design novo
+        ('.rounds-history', By.CSS_SELECTOR), # Fallback
+        ('[data-testid="history"]', By.CSS_SELECTOR)
     ]
 
     driver.switch_to.default_content()
     iframe = None
     
+    # Busca Iframe
     for xpath in POSSIVEIS_IFRAMES:
         try:
             iframe = WebDriverWait(driver, 5).until(EC.presence_of_element_located((By.XPATH, xpath)))
             driver.switch_to.frame(iframe)
-            print(f"✅ Iframe encontrado: {xpath}")
+            print(f"✅ Iframe conectado: {xpath}")
             break
         except:
             driver.switch_to.default_content()
             continue
 
-    if not iframe:
-        print("⚠️ Iframe não encontrado.")
-        return None, None
+    if not iframe: return None, None
 
+    # Busca Histórico
     hist = None
     for selector, by_method in POSSIVEIS_HISTORICOS:
         try:
             hist = WebDriverWait(driver, 5).until(EC.presence_of_element_located((by_method, selector)))
-            print(f"✅ Histórico encontrado: {selector}")
+            print(f"✅ Histórico detectado: {selector}")
             break
         except: continue
 
     if not hist:
-        print("⚠️ Histórico não encontrado.")
         driver.switch_to.default_content()
         return None, None
 
@@ -221,20 +205,18 @@ def getColorClass(value):
     return "default-bg"
 
 # =============================================================
-# 🤖 MOTOR DO ROBÔ (Lógica Otimizada)
+# 🤖 LOOP PRINCIPAL (TURBO)
 # =============================================================
 def run_bot_session(relogin_done_for):
     driver = None
     try:
         driver = start_driver()
-        if not process_login(driver):
-            raise Exception("Erro no Login")
+        process_login(driver) # Não encerra se falhar login, tenta ler mesmo assim
 
         iframe, hist = initialize_game_elements(driver)
-        if not hist:
-            raise Exception("Erro Elementos Jogo")
+        if not hist: raise Exception("Falha ao carregar elementos do jogo")
 
-        print("✅ Captura TURBO iniciada (Spribe Priority).\n")
+        print("✅ Robô Iniciado (V5.1 - Spribe Priority)\n")
         
         LAST_SENT = None
         ULTIMO_ENVIO = time()
@@ -244,33 +226,27 @@ def run_bot_session(relogin_done_for):
             # 1. Reinício Diário (00:00)
             now_br = datetime.now(TZ_BR)
             if now_br.hour == 0 and now_br.minute <= 5 and (relogin_done_for != now_br.date()):
-                print(f"🕛 Reinício diário programado.")
+                print(f"🕛 Reinício diário.")
                 driver.quit()
                 return now_br.date()
 
-            # 2. Checagem de Inatividade
+            # 2. Inatividade (6 min)
             if (time() - ULTIMO_MULTIPLIER_TIME) > TEMPO_MAX_INATIVIDADE:
-                print("🚨 Sem resultados há 6 min. Reiniciando...")
-                raise Exception("Inatividade")
+                raise Exception("Inatividade - Reiniciando...")
 
-            # 3. LEITURA RÁPIDA
+            # 3. Leitura dos Multiplicadores
             try:
                 resultados = []
                 
-                # Tenta ler itens individuais (payouts-block)
+                # Método 1: Itens individuais (Mais preciso)
                 try:
                     items = hist.find_elements(By.CSS_SELECTOR, ".payouts-block .payout")
-                    if items:
-                        for it in items:
-                            txt = (it.text or "").strip().replace("x", "")
-                            if txt:
-                                try:
-                                    v = float(txt)
-                                    if v >= 1.0: resultados.append(v)
-                                except: pass
+                    for it in items:
+                        txt = it.text.strip().replace("x", "")
+                        if txt: resultados.append(float(txt))
                 except: pass
 
-                # Fallback texto se items falhar
+                # Método 2: Texto bruto (Fallback)
                 if not resultados:
                     txt_full = hist.text.replace('x', '').replace('\n', ' ')
                     for val in txt_full.split():
@@ -279,9 +255,9 @@ def run_bot_session(relogin_done_for):
                             if v >= 1.0: resultados.append(v)
                         except: pass
 
-                # 4. PROCESSAMENTO
+                # Processamento
                 if resultados:
-                    # Remove duplicatas mantendo ordem
+                    # Filtra duplicados mantendo ordem
                     seen = set()
                     resultados_unique = [x for x in resultados if not (x in seen or seen.add(x))]
                     
@@ -289,64 +265,57 @@ def run_bot_session(relogin_done_for):
                         novo = resultados_unique[0]
                         
                         if novo != LAST_SENT:
-                            ULTIMO_MULTIPLIER_TIME = time() # Atualiza tempo de vida
-                            
+                            ULTIMO_MULTIPLIER_TIME = time()
                             now_br = datetime.now(TZ_BR)
                             raw = f"{novo:.2f}"
-                            entry_key = now_br.strftime("%Y-%m-%d_%H-%M-%S-%f").replace('.', '-')
-                            time_display = now_br.strftime("%H:%M:%S")
                             
+                            # Salva no Firebase
                             entry = {
                                 "multiplier": raw,
-                                "time": time_display,
+                                "time": now_br.strftime("%H:%M:%S"),
                                 "color": getColorClass(novo),
                                 "date": now_br.strftime("%Y-%m-%d")
                             }
+                            entry_key = now_br.strftime("%Y-%m-%d_%H-%M-%S-%f").replace('.', '-')
                             
                             try:
                                 db.reference(f"history/{entry_key}").set(entry)
-                                print(f"🔥 {raw}x salvo às {time_display}")
+                                print(f"🔥 {raw}x detectado.")
                                 LAST_SENT = novo
-                                ULTIMO_ENVIO = time()
-                            except Exception as e: 
-                                print(f"⚠️ Erro DB: {e}")
+                            except: pass
 
                 sleep(POLLING_INTERVAL)
 
-            except (StaleElementReferenceException, TimeoutException, WebDriverException):
-                print("⚠️ Elementos perdidos. Reconectando...")
+            except (StaleElementReferenceException, TimeoutException):
+                # Reconexão rápida
                 driver.switch_to.default_content()
                 check_blocking_modals(driver)
                 iframe, hist = initialize_game_elements(driver)
-                if not hist: raise Exception("Falha na reconexão")
+                if not hist: raise Exception("Perda de conexão com o jogo")
 
     except Exception as e:
-        print(f"❌ Sessão encerrada: {e}")
+        print(f"❌ Erro: {e}. Reiniciando...")
         if driver:
             try: driver.quit()
             except: pass
         raise e
 
 # =============================================================
-# 🛡️ GUARDIÃO
+# 🛡️ START
 # =============================================================
-def run_guardian():
-    print("\n==============================================")
-    print("      GOATHBOT V5.0 (SERVER + TURBO)")
+if __name__ == "__main__":
     print("==============================================")
-    relogin_date = date.today()
+    print("      GOATHBOT V5.1 (SERVIDOR + FIX LOGIN)")
+    print("==============================================")
     
+    if not EMAIL or not PASSWORD:
+        print("❗ AVISO: EMAIL ou PASSWORD não configurados (Rodando sem login).")
+    
+    relogin_date = date.today()
     while True:
         try:
             nova = run_bot_session(relogin_date)
             if nova: relogin_date = nova
         except KeyboardInterrupt: break
         except:
-            print("🔄 Reiniciando em 5s...")
             sleep(5)
-
-if __name__ == "__main__":
-    if not EMAIL or not PASSWORD:
-        print("❗ Configure EMAIL e PASSWORD nas variáveis de ambiente.")
-    else:
-        run_guardian()
