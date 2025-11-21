@@ -16,12 +16,11 @@ from firebase_admin import db
 import os
 import pytz
 import logging
-from typing import Tuple, Optional
 
 logging.getLogger('selenium').setLevel(logging.WARNING)
 
 # =============================================================
-# 🔥 FIREBASE
+# FIREBASE
 # =============================================================
 SERVICE_ACCOUNT_FILE = 'serviceAccountKey.json'
 DATABASE_URL = 'https://history-dashboard-a70ee-default-rtdb.firebaseio.com'
@@ -50,18 +49,16 @@ TEMPO_MAX_INATIVIDADE = 360
 TZ_BR = pytz.timezone("America/Sao_Paulo")
 
 # =============================================================
-# FUNÇÕES AUXILIARES
+# AUXILIARES
 # =============================================================
-def getColorClass(value: float) -> str:
-    if 1.0 <= value < 2.0:
-        return "blue-bg"
-    if 2.0 <= value < 10.0:
-        return "purple-bg"
-    if value >= 10.0:
-        return "magenta-bg"
+def getColorClass(v):
+    v = float(v)
+    if 1.0 <= v < 2.0: return "blue-bg"
+    if 2.0 <= v < 10.0: return "purple-bg"
+    if v >= 10.0: return "magenta-bg"
     return "default-bg"
 
-def safe_click(driver, by, value, timeout=5):
+def safe_click(driver, by, value, timeout=4):
     try:
         el = WebDriverWait(driver, timeout).until(EC.element_to_be_clickable((by, value)))
         driver.execute_script("arguments[0].click();", el)
@@ -69,7 +66,7 @@ def safe_click(driver, by, value, timeout=5):
     except:
         return False
 
-def safe_find(driver, by, value, timeout=5):
+def safe_find(driver, by, value, timeout=4):
     try:
         return WebDriverWait(driver, timeout).until(EC.presence_of_element_located((by, value)))
     except:
@@ -77,30 +74,131 @@ def safe_find(driver, by, value, timeout=5):
 
 def check_blocking_modals(driver):
     try:
-        safe_click(driver, By.XPATH, "//button[contains(., 'Sim')]", 1)
-        safe_click(driver, By.XPATH, "//button[contains(., 'Aceitar')]", 1)
+        # Maior de 18
+        for xp in [
+            "//button[contains(., 'Sim')]",
+            "//div[contains(text(), '18 anos')]/..//button[contains(., 'Sim')]",
+            "//button[contains(@class, 'MuiButton') and contains(., 'Sim')]"
+        ]:
+            if safe_click(driver, By.XPATH, xp, 1):
+                sleep(0.3)
+                break
+
+        # Cookies
         safe_click(driver, By.XPATH, "//button[contains(., 'Aceitar todos')]", 1)
+        safe_click(driver, By.XPATH, "//button[contains(., 'Aceitar')]", 1)
     except:
         pass
+
+# =============================================================
+# DRIVER HEADLESS (ATUALIZADO)
+# =============================================================
+def start_driver():
+    options = webdriver.ChromeOptions()
+    options.page_load_strategy = 'eager'
+
+    options.add_argument("--headless=new")
+    options.add_argument("--window-size=1920,1080")
+    options.add_argument("--start-maximized")
+
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--disable-popup-blocking")
+    options.add_argument("--log-level=3")
+    options.add_experimental_option('excludeSwitches', ['enable-logging'])
+
+    service = Service("/usr/lib/chromium-browser/chromedriver")
+    return webdriver.Chrome(service=service, options=options)
+
+# =============================================================
+# LOGIN COMPLETO (FUNCIONAL)
+# =============================================================
+def process_login(driver):
+
+    print("➡️ Executando login automático...")
+
+    driver.get(URL_DO_SITE)
+    sleep(2)
+
+    check_blocking_modals(driver)
+
+    login_buttons = [
+        (By.CSS_SELECTOR, 'button[data-testid="header-login-button"]'),
+        (By.XPATH, "//button[contains(., 'Entrar')]"),
+        (By.XPATH, "//button[contains(., 'Login')]"),
+        (By.CSS_SELECTOR, "button[aria-label='Entrar']"),
+        (By.CSS_SELECTOR, "button[class*='login']")
+    ]
+
+    abriu = False
+    for by, sel in login_buttons:
+        if safe_click(driver, by, sel, 3):
+            abriu = True
+            break
+
+    if not abriu:
+        print("❌ Botão 'Login' inicial não encontrado.")
+        return False
+
+    sleep(1)
+
+    email_field = safe_find(driver, By.NAME, "email", 4)
+    pass_field = safe_find(driver, By.NAME, "password", 4)
+
+    if not email_field or not pass_field:
+        print("❌ Campos de login não encontrados.")
+        return False
+
+    email_field.clear(); pass_field.clear()
+    email_field.send_keys(EMAIL)
+    pass_field.send_keys(PASSWORD)
+    sleep(0.3)
+
+    # Botão final
+    submit_selectors = [
+        (By.CSS_SELECTOR, "button[type='submit']"),
+        (By.XPATH, "//button[contains(., 'Entrar')]"),
+        (By.XPATH, "//button[contains(., 'Login')]")
+    ]
+
+    for by, sel in submit_selectors:
+        if safe_click(driver, by, sel, 3):
+            print("✅ Login enviado.")
+            break
+
+    sleep(4)
+    check_blocking_modals(driver)
+
+    print("ℹ️ Abrindo Aviator...")
+    driver.get(LINK_AVIATOR)
+    sleep(2)
+    check_blocking_modals(driver)
+
+    try:
+        WebDriverWait(driver, 15).until(
+            EC.presence_of_element_located((By.XPATH, '//iframe[contains(@src, "spribe")]'))
+        )
+    except:
+        sleep(3)
+
+    return True
 
 # =============================================================
 # IFRAME + HISTÓRICO (PRIORIDADE SPRIBE)
 # =============================================================
 def initialize_game_elements(driver):
 
-    # Prioridade máxima
-    IFRAME_PRIORITARIO = ['//iframe[contains(@src, "spribe")]']
-    HIST_PRIORITARIO = [('.payouts-block', By.CSS_SELECTOR)]
+    PRIOR_IFRAME = ['//iframe[contains(@src, "spribe")]']
+    PRIOR_HIST = [('.payouts-block', By.CSS_SELECTOR)]
 
-    # Fallbacks
-    POSSIVEIS_IFRAMES = [
+    IF_FALLBACK = [
         '//iframe[contains(@src, "salsagator")]',
         '//iframe[contains(@src, "/aviator/")]',
         '//iframe[contains(@src, "aviator")]',
         '//iframe[contains(@src, "game")]'
     ]
 
-    POSSIVEIS_HISTORICOS = [
+    HIST_FALLBACK = [
         ('div.payouts-block', By.CSS_SELECTOR),
         ('.rounds-history', By.CSS_SELECTOR),
         ('.history-list', By.CSS_SELECTOR),
@@ -108,10 +206,9 @@ def initialize_game_elements(driver):
     ]
 
     driver.switch_to.default_content()
-
-    # === IFRAME PRINCIPAL ===
     iframe = None
-    for xp in IFRAME_PRIORITARIO:
+
+    for xp in PRIOR_IFRAME:
         try:
             iframe = WebDriverWait(driver, 5).until(EC.presence_of_element_located((By.XPATH, xp)))
             driver.switch_to.frame(iframe)
@@ -120,37 +217,34 @@ def initialize_game_elements(driver):
         except:
             iframe = None
 
-    # === FALLBACK IFRAME ===
     if not iframe:
-        for xp in POSSIVEIS_IFRAMES:
+        for xp in IF_FALLBACK:
             try:
                 iframe = WebDriverWait(driver, 3).until(EC.presence_of_element_located((By.XPATH, xp)))
                 driver.switch_to.frame(iframe)
                 print(f"⚠️ Iframe alternativo encontrado: {xp}")
                 break
             except:
-                driver.switch_to.default_content()
                 iframe = None
 
     if not iframe:
         print("❌ Nenhum iframe encontrado.")
         return None, None
 
-    # === HISTÓRICO PRINCIPAL ===
+    # histórico
     hist = None
-    for selector, by_method in HIST_PRIORITARIO:
+    for selector, by in PRIOR_HIST:
         try:
-            hist = WebDriverWait(driver, 3).until(EC.presence_of_element_located((by_method, selector)))
+            hist = WebDriverWait(driver, 3).until(EC.presence_of_element_located((by, selector)))
             print(f"✅ Seletor de histórico encontrado: {selector}")
             break
         except:
             hist = None
 
-    # === FALLBACK HISTÓRICO ===
     if not hist:
-        for selector, by_method in POSSIVEIS_HISTORICOS:
+        for selector, by in HIST_FALLBACK:
             try:
-                hist = WebDriverWait(driver, 3).until(EC.presence_of_element_located((by_method, selector)))
+                hist = WebDriverWait(driver, 3).until(EC.presence_of_element_located((by, selector)))
                 print(f"⚠️ Histórico alternativo encontrado: {selector}")
                 break
             except:
@@ -163,79 +257,6 @@ def initialize_game_elements(driver):
     return iframe, hist
 
 # =============================================================
-# LOGIN
-# =============================================================
-def process_login(driver):
-
-    if not EMAIL or not PASSWORD:
-        print("❌ EMAIL ou PASSWORD não configurados.")
-        return False
-
-    print("➡️ Executando login automático...")
-
-    driver.get(URL_DO_SITE)
-    sleep(2)
-    check_blocking_modals(driver)
-
-    # NOVOS SELECTORS DO GOATHBET
-    login_selectors = [
-        (By.CSS_SELECTOR, 'button[data-testid="header-login-button"]'),
-        (By.CSS_SELECTOR, 'button:has(svg[data-testid="LoginIcon"])'),
-        (By.XPATH, "//button[contains(., 'Entrar')]"),
-        (By.XPATH, "//button[contains(., 'Login')]"),
-        (By.CSS_SELECTOR, 'button[aria-label="Entrar"]'),
-        (By.CSS_SELECTOR, 'button[aria-label="Login"]'),
-        (By.CSS_SELECTOR, "button[class*='login']")
-    ]
-
-    opened = False
-    for by, v in login_selectors:
-        if safe_click(driver, by, v, 2):
-            opened = True
-            break
-
-    if not opened:
-        print("❌ Botão 'Login' inicial não encontrado.")
-    else:
-        sleep(1)
-
-    email_input = safe_find(driver, By.NAME, "email", 3)
-    pass_input = safe_find(driver, By.NAME, "password", 3)
-
-    if email_input and pass_input:
-        email_input.send_keys(EMAIL)
-        pass_input.send_keys(PASSWORD)
-        sleep(0.5)
-        safe_click(driver, By.CSS_SELECTOR, "button[type='submit']", 4)
-
-    sleep(4)
-    check_blocking_modals(driver)
-
-    driver.get(LINK_AVIATOR)
-    sleep(3)
-    check_blocking_modals(driver)
-
-    return True
-
-# =============================================================
-# DRIVER HEADLESS
-# =============================================================
-def start_driver():
-    options = webdriver.ChromeOptions()
-    options.page_load_strategy = 'eager'
-    options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
-    options.add_argument("--disable-blink-features=AutomationControlled")
-    options.add_argument("--disable-popup-blocking")
-    options.add_argument("--headless")
-    options.add_argument("--window-size=1920,1080")
-    options.add_argument("--log-level=3")
-    options.add_experimental_option('excludeSwitches', ['enable-logging'])
-
-    service = Service("/usr/lib/chromium-browser/chromedriver")
-    return webdriver.Chrome(service=service, options=options)
-
-# =============================================================
 # LOOP PRINCIPAL
 # =============================================================
 def run_bot_session(relogin_done_for):
@@ -243,12 +264,13 @@ def run_bot_session(relogin_done_for):
     driver = None
     try:
         driver = start_driver()
+
         if not process_login(driver):
-            raise Exception("Erro no login")
+            raise Exception("Falha no login")
 
         iframe, hist = initialize_game_elements(driver)
         if not hist:
-            raise Exception("Erro nos elementos")
+            raise Exception("Erro ao encontrar elementos do jogo")
 
         LAST_SENT = None
         ULTIMO_ENVIO = time()
@@ -257,6 +279,7 @@ def run_bot_session(relogin_done_for):
         print("🚀 Captura TURBO iniciada.\n")
 
         while True:
+
             now_br = datetime.now(TZ_BR)
 
             if now_br.hour == 0 and now_br.minute <= 5 and relogin_done_for != now_br.date():
@@ -265,13 +288,13 @@ def run_bot_session(relogin_done_for):
                 return now_br.date()
 
             if (time() - ULTIMO_MULTIPLIER_TIME) > TEMPO_MAX_INATIVIDADE:
-                print("🚨 Inatividade detectada.")
                 raise Exception("Inatividade")
 
             try:
                 driver.switch_to.frame(iframe)
 
                 resultados = []
+
                 items = hist.find_elements(By.CSS_SELECTOR, ".payouts-block .payout")
 
                 if items:
@@ -295,10 +318,12 @@ def run_bot_session(relogin_done_for):
 
                 if resultados:
                     novo = resultados[0]
+
                     if novo != LAST_SENT and (time() - ULTIMO_ENVIO) > INTERVALO_MINIMO_ENVIO:
+
                         now_br = datetime.now(TZ_BR)
                         raw = f"{novo:.2f}"
-                        entry_key = now_br.strftime("%Y-%m-%d_%H-%M-%S-%f").replace('.', '-')
+                        key = now_br.strftime("%Y-%m-%d_%H-%M-%S-%f").replace('.', '-')
 
                         entry = {
                             "multiplier": raw,
@@ -307,7 +332,7 @@ def run_bot_session(relogin_done_for):
                             "date": now_br.strftime("%Y-%m-%d")
                         }
 
-                        db.reference(f"history/{entry_key}").set(entry)
+                        db.reference(f"history/{key}").set(entry)
                         print(f"🔥 {raw}x salvo às {entry['time']}")
 
                         LAST_SENT = novo
@@ -320,16 +345,17 @@ def run_bot_session(relogin_done_for):
                 check_blocking_modals(driver)
                 iframe, hist = initialize_game_elements(driver)
                 if not hist:
-                    raise Exception("Falha reconexão")
+                    raise Exception("Reconexão falhou")
 
             sleep(POLLING_INTERVAL)
 
     except Exception as e:
-        print(f"❌ Erro na sessão: {e}")
+        print(f"❌ Sessão encerrada: {e}")
         if driver:
             try: driver.quit()
             except: pass
         raise e
+
 
 # =============================================================
 # GUARDIÃO
@@ -348,9 +374,10 @@ def run_guardian():
                 relogin_date = nova
 
         except KeyboardInterrupt:
-            print("🛑 Finalizado manualmente.")
+            print("🛑 Bot finalizado.")
             break
-        except:
+
+        except Exception as e:
             print("🔄 Reiniciando em 5s...")
             sleep(5)
 
