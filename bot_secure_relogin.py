@@ -12,16 +12,28 @@ from firebase_admin import credentials, db
 import os
 import pytz
 import logging
-import threading  # <--- NOVO: Essencial para rodar o envio sem bloquear
-import sys # <--- ADICIONADO PARA SAÍDAS CRÍTICAS
+import threading  # <--- IMPORTANTE PARA RODAR OS 2 AO MESMO TEMPO
 
 # =============================================================
-# 🔥 GOATHBOT V5.4 - FIX THREADING FIREBASE
+# 🔥 GOATHBOT V6.0 - DUAL MODE (SERVER EDITION)
 # =============================================================
 SERVICE_ACCOUNT_FILE = 'serviceAccountKey.json'
 DATABASE_URL = 'https://history-dashboard-a70ee-default-rtdb.firebaseio.com'
 URL_DO_SITE = "https://www.goathbet.com"
-LINK_AVIATOR = "https://www.goathbet.com/pt/casino/spribe/aviator"
+
+# CONFIGURAÇÃO DOS DOIS JOGOS
+CONFIG_BOTS = [
+    {
+        "nome": "ORIGINAL",
+        "link": "https://www.goathbet.com/pt/casino/spribe/aviator",
+        "firebase_path": "history"
+    },
+    {
+        "nome": "AVIATOR 2",
+        "link": "https://www.goathbet.com/pt/casino/spribe/aviator-2",
+        "firebase_path": "aviator2"
+    }
+]
 
 # Configuração Limpa de Logs
 logging.getLogger('WDM').setLevel(logging.ERROR)
@@ -36,7 +48,7 @@ POLLING_INTERVAL = 0.1
 TEMPO_MAX_INATIVIDADE = 360     
 
 # =============================================================
-# 🔧 FIREBASE E FUNÇÕES AUXILIARES
+# 🔧 FIREBASE
 # =============================================================
 try:
     if not firebase_admin._apps:
@@ -45,30 +57,15 @@ try:
     print("✅ Conexão Firebase estabelecida.")
 except Exception as e:
     print(f"\n❌ ERRO CRÍTICO NO FIREBASE: {e}")
-    print("⚠️ IMPORTANTE: Sua chave JSON é inválida ou expirou. Gere uma nova no console do Firebase!\n")
-    sys.exit(1) # Sai se o Firebase falhar
-
-def enviar_firebase_async(path, data):
-    """Envia dados para o Firebase em uma thread separada (não bloqueia o loop principal)."""
-    def _send():
-        try:
-            db.reference(path).set(data)
-        except Exception as e:
-            # Não é um erro crítico, apenas avisa que o envio falhou
-            print(f"⚠️ Falha no envio Firebase: {e}")
-    
-    # Inicia o envio em uma nova thread
-    threading.Thread(target=_send).start()
 
 # =============================================================
 # 🛠️ DRIVER E NAVEGAÇÃO
-# ... (NÃO ALTERADO)
 # =============================================================
 def start_driver():
     options = webdriver.ChromeOptions()
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
-    options.add_argument("--headless=new") # Recomenda-se a flag mais nova
+    options.add_argument("--headless=new") # Atualizado para nova flag headless
     options.add_argument("--disable-gpu")
     options.add_argument("--window-size=1920,1080")
     options.page_load_strategy = 'eager'
@@ -79,6 +76,7 @@ def start_driver():
     try:
         return webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
     except:
+        # Fallback para servidores Linux (Render/Heroku/VPS)
         return webdriver.Chrome(service=Service("/usr/bin/chromedriver"), options=options)
 
 def safe_click(driver, by, value, timeout=5):
@@ -101,8 +99,8 @@ def check_blocking_modals(driver):
             if safe_click(driver, By.XPATH, xp, 1): break
     except: pass
 
-def process_login(driver):
-    print("➡️ Iniciando fluxo de login...")
+def process_login(driver, target_link):
+    # 1. Acessa Home e faz Login
     try: driver.get(URL_DO_SITE)
     except: pass
     sleep(2)
@@ -110,23 +108,20 @@ def process_login(driver):
 
     if safe_click(driver, By.XPATH, "//button[contains(., 'Entrar')]", 5) or \
        safe_click(driver, By.CSS_SELECTOR, 'a[href*="login"]', 5):
-        
         sleep(1)
         try:
             driver.find_element(By.NAME, "email").send_keys(EMAIL)
             driver.find_element(By.NAME, "password").send_keys(PASSWORD)
-            
             if safe_click(driver, By.CSS_SELECTOR, "button[type='submit']", 5):
-                print("✅ Credenciais enviadas.")
                 sleep(3)
         except: pass
     
-    print("➡️ Abrindo Aviator Spribe...")
-    driver.get(LINK_AVIATOR)
+    # 2. Navega para o jogo específico
+    driver.get(target_link)
     
     try:
         WebDriverWait(driver, 15).until(
-            EC.presence_of_element_located((By.XPATH, '//iframe[contains(@src, "spribe")]'))
+            EC.presence_of_element_located((By.XPATH, '//iframe[contains(@src, "spribe") or contains(@src, "aviator")]'))
         )
     except: pass
         
@@ -134,31 +129,26 @@ def process_login(driver):
     return True
 
 def initialize_game_elements(driver):
-    driver.switch_to.default_content()
+    """Tenta localizar o iframe e o elemento de histórico."""
+    try:
+        driver.switch_to.default_content()
+    except: pass
     
     iframe = None
     try:
         iframe = WebDriverWait(driver, 10).until(
-            EC.presence_of_element_located((By.XPATH, '//iframe[contains(@src, "spribe")]'))
+            EC.presence_of_element_located((By.XPATH, '//iframe[contains(@src, "spribe") or contains(@src, "aviator")]'))
         )
         driver.switch_to.frame(iframe)
-        print(f"✅ Iframe Spribe Conectado.")
     except:
-        try:
-            iframe = WebDriverWait(driver, 5).until(
-                EC.presence_of_element_located((By.XPATH, '//iframe[contains(@src, "aviator")]'))
-            )
-            driver.switch_to.frame(iframe)
-        except:
-            driver.switch_to.default_content()
-            return None, None
+        return None, None
 
     hist = None
     try:
+        # Payouts-block é mais comum para o container de histórico
         hist = WebDriverWait(driver, 5).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, ".payouts-block, app-stats-widget")) # Adicionado seletor alternativo
+            EC.presence_of_element_located((By.CSS_SELECTOR, ".payouts-block, app-stats-widget"))
         )
-        print(f"✅ Histórico encontrado.")
     except:
         return None, None
 
@@ -174,107 +164,123 @@ def getColorClass(value):
     except: return "default-bg"
 
 # =============================================================
-# 🤖 MOTOR DO ROBÔ (V5.4)
+# 🤖 LÓGICA DE SESSÃO INDIVIDUAL (THREAD)
 # =============================================================
-def run_bot_session(relogin_done_for):
-    driver = None
-    try:
-        driver = start_driver()
-        process_login(driver)
-
-        iframe, hist = initialize_game_elements(driver)
-        if not hist: raise Exception("Elementos do jogo não carregaram")
-
-        print("\n🔥 GOATHBOT V5.4 OPERACIONAL (Non-Blocking Firebase)\n")
-        
-        LAST_SENT = None
-        ULTIMO_MULTIPLIER_TIME = time()
-        
-        while True:
-            # 1. Reinício Diário
-            now_br = datetime.now(TZ_BR)
-            if now_br.hour == 0 and now_br.minute <= 5 and (relogin_done_for != now_br.date()):
-                driver.quit()
-                return now_br.date()
-
-            # 2. Inatividade (Checado a cada loop)
-            if (time() - ULTIMO_MULTIPLIER_TIME) > TEMPO_MAX_INATIVIDADE:
-                raise Exception("Inatividade detectada")
-
-            # 3. Leitura Otimizada
-            try:
-                resultados = []
-                try:
-                    items = hist.find_elements(By.CSS_SELECTOR, ".payout, .bubble-multiplier")
-                    for it in items:
-                        txt = it.text.strip().replace("x", "")
-                        if txt: resultados.append(float(txt))
-                except: pass
-
-                if not resultados:
-                    txt_full = hist.text.replace('x', '').replace('\n', ' ')
-                    for val in txt_full.split():
-                        try:
-                            v = float(val)
-                            if v >= 1.0: resultados.append(v)
-                        except: pass
-
-                # 4. Envio
-                if resultados:
-                    # Lógica para pegar o valor mais recente e único
-                    seen = set()
-                    resultados_unique = [x for x in resultados if not (x in seen or seen.add(x))]
-                    
-                    if resultados_unique:
-                        novo = resultados_unique[0]
-                        
-                        if novo != LAST_SENT:
-                            # ATUALIZA O TIMER APENAS AQUI!
-                            ULTIMO_MULTIPLIER_TIME = time()
-                            now_br = datetime.now(TZ_BR)
-                            
-                            entry = {
-                                "multiplier": f"{novo:.2f}",
-                                "time": now_br.strftime("%H:%M:%S"),
-                                "color": getColorClass(novo),
-                                "date": now_br.strftime("%Y-%m-%d")
-                            }
-                            key = now_br.strftime("%Y-%m-%d_%H-%M-%S-%f").replace('.', '-')
-                            
-                            # 👇 NOVO: CHAMA A FUNÇÃO NÃO BLOQUEANTE
-                            enviar_firebase_async(f"history/{key}", entry)
-                            print(f"🔥 {entry['multiplier']}x salvo às {entry['time']} (Thread)")
-                            LAST_SENT = novo
-
-                sleep(POLLING_INTERVAL)
-
-            except (StaleElementReferenceException, TimeoutException):
-                # Tenta refocar o iframe e encontrar o histórico
-                driver.switch_to.default_content()
-                check_blocking_modals(driver)
-                iframe, hist = initialize_game_elements(driver)
-                if not hist: raise Exception("Conexão perdida")
-
-    except Exception as e:
-        print(f"❌ Sessão finalizada: {e}")
-        if driver:
-            try: driver.quit()
-            except: pass
-        # Volta para o loop principal do __main__ para iniciar uma nova sessão
-        raise e
-
-if __name__ == "__main__":
-    print("==============================================")
-    print("          INICIANDO GOATHBOT V5.4")
-    print("==============================================")
+def run_single_bot(bot_config):
+    """Função que roda o ciclo de vida completo de UM bot"""
+    nome = bot_config["nome"]
+    link = bot_config["link"]
+    path_fb = bot_config["firebase_path"]
+    
     relogin_date = date.today()
-    while True:
+
+    while True: # Loop infinito de reconexão se cair
+        driver = None
         try:
-            relogin_date = run_bot_session(relogin_date)
-            # Se run_bot_session retornar uma data, reiniciou com sucesso.
-            if not relogin_date:
-                relogin_date = date.today() # Se falhou/travou, apenas tenta novamente
-        except KeyboardInterrupt: break
-        except Exception: 
-            # Se cair em um erro (Exception), espera 5s e tenta novamente
+            print(f"🔄 [{nome}] Iniciando driver...")
+            driver = start_driver()
+            process_login(driver, link)
+
+            iframe, hist = initialize_game_elements(driver)
+            if not hist: raise Exception("Elementos não encontrados") # Força o reinício
+
+            print(f"🚀 [{nome}] MONITORANDO EM '{path_fb}'")
+            
+            LAST_SENT = None
+            ULTIMO_MULTIPLIER_TIME = time()
+            
+            while True: # Loop de leitura
+                # 1. Manutenção Diária
+                now_br = datetime.now(TZ_BR)
+                # Verifica entre 00:00 e 00:05 (ou ajuste para 23:59 se preferir essa hora)
+                if now_br.hour == 0 and now_br.minute <= 5 and (relogin_date != now_br.date()):
+                    print(f"🌙 [{nome}] Reinício diário...")
+                    driver.quit()
+                    relogin_date = now_br.date()
+                    break # Sai do loop de leitura para reiniciar driver
+
+                # 2. Check Inatividade (6 minutos sem novo multiplicador)
+                if (time() - ULTIMO_MULTIPLIER_TIME) > TEMPO_MAX_INATIVIDADE:
+                    raise Exception("Inatividade detectada")
+
+                # 3. Leitura e Processamento (Corrigido para ser mais robusto)
+                try:
+                    # Tenta pegar apenas o primeiro multiplicador (mais recente)
+                    first_payout = hist.find_element(By.CSS_SELECTOR, ".payout:first-child, .bubble-multiplier:first-child")
+                    raw_text = first_payout.get_attribute("innerText")
+                    clean_text = raw_text.strip().lower().replace('x', '')
+
+                    if not clean_text:
+                        sleep(POLLING_INTERVAL)
+                        continue # Não há texto (ex: elemento vazio), apenas continua
+
+                    try:
+                        novo = float(clean_text)
+                    except ValueError:
+                        sleep(POLLING_INTERVAL)
+                        continue # Não é um número (ex: 'Aguardando'), apenas continua
+                    
+                    # 4. Envio
+                    if novo != LAST_SENT:
+                        ULTIMO_MULTIPLIER_TIME = time()
+                        now_br = datetime.now(TZ_BR)
+                        
+                        entry = {
+                            "multiplier": f"{novo:.2f}",
+                            "time": now_br.strftime("%H:%M:%S"),
+                            "color": getColorClass(novo),
+                            "date": now_br.strftime("%Y-%m-%d")
+                        }
+                        key = now_br.strftime("%Y-%m-%d_%H-%M-%S-%f").replace('.', '-')
+                        
+                        try:
+                            db.reference(f"{path_fb}/{key}").set(entry)
+                            print(f"🔥 [{nome}] {entry['multiplier']}x")
+                            LAST_SENT = novo
+                        except Exception as e:
+                            print(f"⚠️ [{nome}] Erro Firebase: {e}")
+
+                    sleep(POLLING_INTERVAL)
+
+                except (StaleElementReferenceException, TimeoutException, Exception) as e:
+                    # Em caso de erro de leitura (Stale, Timeout ou elemento sumiu)
+                    print(f"⚠️ [{nome}] Erro de leitura ('{e.__class__.__name__}'). Tentando re-inicializar elementos...")
+                    driver.switch_to.default_content()
+                    iframe, hist = initialize_game_elements(driver)
+                    
+                    if not hist: 
+                        # Se não conseguir re-inicializar o elemento, força o reinício completo
+                        raise Exception("Falha crítica ao re-inicializar elementos.")
+                    
+                    sleep(POLLING_INTERVAL)
+                    continue # Volta ao início do loop interno
+
+        except Exception as e:
+            # Qualquer exceção que chega aqui (Inatividade, Falha Crítica, Login, etc.) força o reinício do driver
+            print(f"❌ [{nome}] Falha: {e}. Reiniciando em 5s...")
+            if driver:
+                try: driver.quit()
+                except: pass
             sleep(5)
+
+# =============================================================
+# 🚀 EXECUTOR PARALELO
+# =============================================================
+if __name__ == "__main__":
+    if not EMAIL or not PASSWORD:
+        print("❗ Configure EMAIL e PASSWORD nas variáveis de ambiente.")
+    else:
+        print("==============================================")
+        print("    GOATHBOT V6.0 - DUAL MONITORING")
+        print("==============================================")
+
+        threads = []
+        for config in CONFIG_BOTS:
+            t = threading.Thread(target=run_single_bot, args=(config,))
+            t.start()
+            threads.append(t)
+            sleep(2) # Pequena pausa entre o início de cada um para não sobrecarregar CPU
+
+        # Mantém script principal rodando
+        for t in threads:
+            t.join()
