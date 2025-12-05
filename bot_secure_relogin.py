@@ -12,8 +12,8 @@ from firebase_admin import credentials, db
 import os
 import pytz
 import logging
-import threading # Core para o modelo de abas sincronizadas
-import sys
+import threading 
+import sys # Necessário para sair em caso de erro crítico no início
 
 # =============================================================
 # 🔥 GOATHBOT V6.1 - DUAL MODE (SINGLE DRIVER)
@@ -47,11 +47,11 @@ PASSWORD = os.getenv("PASSWORD")
 TZ_BR = pytz.timezone("America/Sao_Paulo")
 
 # Configurações Turbo
-POLLING_INTERVAL = 0.05
+POLLING_INTERVAL = 0.05 # Alterado para 0.05 (sem delay)
 TEMPO_MAX_INATIVIDADE = 360
 
 # Variáveis Globais de Sincronização
-DRIVER_LOCK = threading.Lock() # 🔒 O CRÍTICO: Garante acesso exclusivo ao driver
+DRIVER_LOCK = threading.Lock() # 🔒 Garante acesso exclusivo ao driver
 GLOBAL_DRIVER = None           # 🌎 O Driver compartilhado
 RESTART_FLAG = False           # 🔄 Flag para forçar o reinício completo se houver falha crítica
 
@@ -91,7 +91,8 @@ def start_driver():
     except:
         # Fallback para ambientes de servidor
         try:
-             return webdriver.Chrome(options=options)
+            # Fallback para servidores Linux (Render/Heroku/VPS)
+            return webdriver.Chrome(service=Service("/usr/bin/chromedriver"), options=options)
         except Exception as e:
             print(f"❌ Erro ao iniciar driver: {e}")
             raise
@@ -120,7 +121,7 @@ def check_blocking_modals(driver):
             break
 
 def initial_login_and_setup(driver):
-    """Faz o login e navega para a home. Deve ser chamado antes das threads."""
+    """Faz o login (fora da thread, apenas uma vez)."""
     print("⏳ Acessando site e configurando abas...")
     
     # 1. Acessa Home e faz Login
@@ -161,12 +162,12 @@ def setup_tabs(driver, bots_config):
         config["window_handle"] = driver.current_window_handle
         print(f"✅ Aba {config['nome']} ({config['firebase_path']}) configurada.")
         
-    # Volta para a primeira aba (que será a primeira a ser monitorada)
+    # Volta para a primeira aba
     driver.switch_to.window(bots_config[0]["window_handle"])
     return True
 
 def initialize_game_elements(driver, bot_config):
-    """Localiza o iframe e o elemento de histórico DENTRO do lock."""
+    """Localiza o iframe e o elemento de histórico APENAS para verificação inicial."""
     nome = bot_config["nome"]
     
     # 1. Troca o foco para a aba correta
@@ -176,7 +177,6 @@ def initialize_game_elements(driver, bot_config):
     try: driver.switch_to.default_content()
     except: pass
     
-    iframe = None
     try:
         print(f"[{nome}] Buscando Iframe para {nome}...")
         iframe = WebDriverWait(driver, 5).until(
@@ -184,20 +184,19 @@ def initialize_game_elements(driver, bot_config):
         )
         driver.switch_to.frame(iframe)
     except:
-        return None, None
+        return False # Falha ao encontrar Iframe
 
-    hist = None
     try:
         print(f"[{nome}] Buscando Histórico...")
         # Aumentei o timeout de espera aqui
-        hist = WebDriverWait(driver, 5).until(
+        WebDriverWait(driver, 5).until(
             EC.presence_of_element_located((By.CSS_SELECTOR, ".payouts-block, app-stats-widget"))
         )
         print(f"[{nome}] Elementos de {nome} carregados com sucesso.")
     except:
-        return iframe, None # Retorna Iframe, mas sem histórico
+        return False # Falha ao encontrar histórico
 
-    return iframe, hist
+    return True
 
 def getColorClass(value):
     try:
@@ -218,26 +217,24 @@ def run_single_bot(bot_config):
     nome = bot_config["nome"]
     path_fb = bot_config["firebase_path"]
     
-    # O driver e o handle estão em variáveis globais/config, não precisam ser criados aqui
     driver = GLOBAL_DRIVER
     
     # Variáveis de monitoramento específicas da Thread
     LAST_SENT = None
     ULTIMO_MULTIPLIER_TIME = time()
     relogin_date = date.today()
-    iframe, hist = None, None
 
     # Tenta carregar os elementos iniciais (usa o lock)
     with DRIVER_LOCK:
         try:
-            iframe, hist = initialize_game_elements(driver, bot_config)
-            if not hist: 
+            # Apenas verifica se os elementos podem ser encontrados
+            if not initialize_game_elements(driver, bot_config): 
                 raise Exception("Elementos críticos não encontrados na inicialização") 
             print(f"[{nome}] MONITORANDO: {nome}...")
         except Exception as e:
             print(f"❌ [{nome}] Falha crítica na inicialização: {e}. Setando flag de reinício.")
             RESTART_FLAG = True
-            return # Sai da thread para forçar o reinício completo no executor principal
+            return # Sai da thread para forçar o reinício completo
 
     while not RESTART_FLAG: # Loop de leitura
         try:
@@ -248,24 +245,36 @@ def run_single_bot(bot_config):
                 print(f"🌙 [{nome}] Reinício diário forçado. Setando flag de reinício.")
                 relogin_date = now_br.date()
                 RESTART_FLAG = True
-                break # Sai do loop de leitura
+                break 
 
             if (time() - ULTIMO_MULTIPLIER_TIME) > TEMPO_MAX_INATIVIDADE:
                 print(f"❌ [{nome}] Inatividade detectada. Setando flag de reinício.")
                 RESTART_FLAG = True
                 break
                 
-            # 2. Acesso Sincronizado para Leitura
+            # 2. Acesso Sincronizado para Leitura (BLOCO CRÍTICO)
             with DRIVER_LOCK:
-                # Troca para a aba correta e foca no iframe ANTES de tentar ler
+                # Troca para a aba correta
                 driver.switch_to.window(bot_config["window_handle"])
                 driver.switch_to.default_content()
-                driver.switch_to.frame(iframe) 
+
+                # Revalida o foco no iframe
+                iframe_element = WebDriverWait(driver, 1).until(
+                    EC.presence_of_element_located((By.XPATH, '//iframe[contains(@src, "spribe") or contains(@src, "aviator")]'))
+                )
+                driver.switch_to.frame(iframe_element)
                 
+                # REVALIDAÇÃO DO HISTÓRICO: Espera que o elemento de histórico esteja presente
+                hist = WebDriverWait(driver, 1).until(
+                    EC.presence_of_element_located((By.CSS_SELECTOR, ".payouts-block, app-stats-widget"))
+                )
+
                 # Leitura
                 first_payout = hist.find_element(By.CSS_SELECTOR, ".payout:first-child, .bubble-multiplier:first-child")
                 raw_text = first_payout.get_attribute("innerText")
                 clean_text = raw_text.strip().lower().replace('x', '')
+
+            # FIM DO LOCK
 
             if not clean_text:
                 sleep(POLLING_INTERVAL)
@@ -298,23 +307,20 @@ def run_single_bot(bot_config):
 
             sleep(POLLING_INTERVAL)
 
-        except (StaleElementReferenceException, NoSuchElementException, WebDriverException) as e:
+        except (StaleElementReferenceException, NoSuchElementException, WebDriverException, TimeoutException) as e:
             error_name = e.__class__.__name__
-            print(f"⚠️ [{nome}] Erro de elemento ('{error_name}'). Tentando re-inicializar elementos...")
+            print(f"⚠️ [{nome}] Erro de elemento ('{error_name}'). Tentando re-inicializar elementos (full)...")
             
-            # Tenta re-inicializar elementos dentro do LOCK
+            # Tenta re-inicializar elementos dentro do LOCK (Verifica se está tudo ok na aba)
             with DRIVER_LOCK:
-                iframe_temp, hist_temp = initialize_game_elements(driver, bot_config)
+                if not initialize_game_elements(driver, bot_config):
+                    # Falha crítica ao re-inicializar
+                    print(f"❌ [{nome}] Falha crítica ao re-inicializar. Setando flag de reinício.")
+                    RESTART_FLAG = True
+                    break
             
-            if hist_temp:
-                iframe, hist = iframe_temp, hist_temp
-                print(f"[{nome}] ✅ Re-inicialização bem-sucedida. Retomando o loop.")
-                continue
-            else: 
-                # Falha crítica ao re-inicializar
-                print(f"❌ [{nome}] Falha crítica ao re-inicializar. Setando flag de reinício.")
-                RESTART_FLAG = True
-                break
+            print(f"[{nome}] ✅ Re-inicialização bem-sucedida. Retomando o loop.")
+            continue
                 
         except Exception as e:
             # Captura qualquer outro erro inesperado
@@ -354,7 +360,6 @@ if __name__ == "__main__":
             # 3. Inicia as Threads
             threads = []
             for config in CONFIG_BOTS:
-                # Cada thread recebe a config que contém o handle da aba
                 t = threading.Thread(target=run_single_bot, args=(config,))
                 t.start()
                 threads.append(t)
@@ -363,13 +368,13 @@ if __name__ == "__main__":
             for t in threads:
                 t.join()
 
-            # Se chegamos aqui, é porque a RESTART_FLAG foi ativada por uma das threads
+            # Se chegamos aqui, é porque a RESTART_FLAG foi ativada
             if RESTART_FLAG:
                 print("\n\n>>> 🔄 REINICIANDO CICLO COMPLETO (Falha Crítica / Manutenção) <<<")
             
         except Exception as e:
             print(f"\n\n>>> ❌ ERRO CRÍTICO NO EXECUTOR: {e}. Reiniciando em 10s... <<<")
-            RESTART_FLAG = True # Garante que o loop vai reiniciar
+            RESTART_FLAG = True 
             
         finally:
             if GLOBAL_DRIVER:
@@ -379,5 +384,5 @@ if __name__ == "__main__":
             if RESTART_FLAG:
                 sleep(10)
             else:
-                # Se saiu do loop principal sem RESTART_FLAG (deve ser Ctrl+C)
+                # Sai se não houver flag de reinício
                 break
