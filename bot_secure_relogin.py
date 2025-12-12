@@ -17,7 +17,7 @@ import sys
 import subprocess 
 
 # =============================================================
-# 🔥 GOATHBOT V6.8 - DUAL MONITORING (SELECTORS REFORÇADOS)
+# 🔥 GOATHBOT V6.9 - DUAL MONITORING (ESTABILIDADE MÁXIMA)
 # =============================================================
 SERVICE_ACCOUNT_FILE = 'serviceAccountKey.json'
 DATABASE_URL = 'https://history-dashboard-a70ee-default-rtdb.firebaseio.com'
@@ -46,7 +46,8 @@ PASSWORD = os.getenv("PASSWORD")
 TZ_BR = pytz.timezone("America/Sao_Paulo")
 
 POLLING_INTERVAL = 0.1 
-TEMPO_MAX_INATIVIDADE = 360      
+TEMPO_MAX_INATIVIDADE = 360  
+MAX_EMPTY_PAYOUTS_COUNT = 200 # 20 segundos de falha antes de reiniciar (200 * 0.1s)
 
 # =============================================================
 # 🔧 FIREBASE
@@ -214,10 +215,9 @@ def run_single_bot(bot_config):
             LAST_SENT = None
             ULTIMO_MULTIPLIER_TIME = time()
             
-            # NOVO SELETOR: Garante que pegue o primeiro item da lista de históricos.
-            # O "primeiro filho" (first-child) é geralmente o resultado mais recente CONCLUÍDO.
-            # Estamos simplificando e priorizando a estrutura de lista de resultados.
-            SELECTOR_MULTIPLIER = ".payouts-block .payout:first-child, app-stats-widget .bubble-multiplier:first-child"
+            # SELETOR REFORÇADO (Mais genérico para resultados)
+            SELECTOR_MULTIPLIER = "app-stats-widget .bubble-multiplier, .payouts-block .payout"
+            CONSECUTIVE_EMPTY_PAYOUTS = 0
             
             while True: # Loop Leitura
                 now_br = datetime.now(TZ_BR)
@@ -239,10 +239,17 @@ def run_single_bot(bot_config):
                     payouts = driver.find_elements(By.CSS_SELECTOR, SELECTOR_MULTIPLIER)
                     
                     if not payouts:
-                        # LOG DETALHADO: Ajuda a rastrear se o elemento sumiu
-                        print(f"[{nome}] ❓ Payouts vazios. Tentando novamente.") 
+                        # NOVO: Conta a falha e força o reinício se o limite for atingido
+                        CONSECUTIVE_EMPTY_PAYOUTS += 1
+                        if CONSECUTIVE_EMPTY_PAYOUTS > MAX_EMPTY_PAYOUTS_COUNT:
+                             raise Exception(f"Elemento de histórico não encontrado após {MAX_EMPTY_PAYOUTS_COUNT * POLLING_INTERVAL:.1f}s. Reiniciando driver.")
+                             
+                        print(f"[{nome}] ❓ Payouts vazios (Tentativa {CONSECUTIVE_EMPTY_PAYOUTS}).") 
                         sleep(POLLING_INTERVAL)
                         continue 
+                    
+                    # Reset o contador se a leitura foi bem-sucedida
+                    CONSECUTIVE_EMPTY_PAYOUTS = 0
                     
                     raw_text = payouts[0].get_attribute("innerText")
                     clean_text = raw_text.strip().lower().replace('x', '')
@@ -257,8 +264,6 @@ def run_single_bot(bot_config):
                         sleep(POLLING_INTERVAL)
                         continue
                     
-                    # LOG DE RASTREIO: Mostra o que ele leu, mesmo que não salve
-                    # Se o ORIGINAL estiver lendo 1.00x repetidamente, isso irá aparecer
                     if nome == "ORIGINAL":
                          print(f"[{nome}] LIDO: {novo:.2f}x | ÚLTIMO SALVO: {LAST_SENT} | DIFERENTE?: {novo != LAST_SENT}")
 
@@ -308,7 +313,7 @@ if __name__ == "__main__":
         sys.exit(1)
     
     print("==============================================")
-    print("    GOATHBOT V6.8 - DUAL MONITORING (SELECTORS)")
+    print("    GOATHBOT V6.9 - DUAL MONITORING (FINAL)")
     print("==============================================")
 
     threads = []
