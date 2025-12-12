@@ -16,6 +16,7 @@ import threading
 import sys
 import subprocess
 import traceback
+from queue import Queue # 1) IMPORT OBRIGATÓRIO
 
 # =============================================================
 # ⚠️ CONTROLE GLOBAL DE THREADS E DRIVER
@@ -23,8 +24,11 @@ import traceback
 DRIVER_LOCK = threading.Lock() 
 STOP_EVENT = threading.Event() 
 
+# 2) FILA GLOBAL (CRÍTICO PARA RAM E NON-BLOCKING)
+firebase_queue = Queue(maxsize=1000)
+
 # =============================================================
-# 🔥 GOATHBOT V6.1 - DUAL MODE (UNIFICADO E CORRIGIDO)
+# 🔥 GOATHBOT V6.5 - ESTABILIDADE MÁXIMA E ZERO VAZAMENTO
 # =============================================================
 SERVICE_ACCOUNT_FILE = 'serviceAccountKey.json'
 DATABASE_URL = 'https://history-dashboard-a70ee-default-rtdb.firebaseio.com'
@@ -57,7 +61,7 @@ POLLING_INTERVAL = 0.1
 TEMPO_MAX_INATIVIDADE = 360     # 6 minutos
 
 # =============================================================
-# 🔧 FIREBASE
+# 🔧 FIREBASE & WORKER
 # =============================================================
 try:
     if not firebase_admin._apps:
@@ -77,17 +81,31 @@ def getColorClass(value):
         return "default-bg"
     except: return "default-bg"
 
-def enviar_firebase_async(path, data, nome_jogo):
-    """Envia dados ao Firebase em uma thread separada (melhor performance)"""
-    def _send():
+# 4) WORKER ÚNICO E PERSISTENTE
+def firebase_worker():
+    """Worker único que consome a fila e envia para o Firebase."""
+    print("🔥 WORKER FIREBASE INICIADO (Modo Persistente)")
+    while True:
         try:
-            # Usando timestamp como chave para garantir unicidade
-            key = datetime.now(TZ_BR).strftime("%Y-%m-%d_%H-%M-%S-%f").replace('.', '')
-            db.reference(f"{path}/{key}").set(data)
-            print(f"🔥 [{nome_jogo.upper()}] {data['multiplier']}x às {data['time']}")
-        except Exception:
-            pass 
-    threading.Thread(target=_send).start()
+            item = firebase_queue.get()
+            path, data, nome_jogo = item
+            
+            try:
+                # Usa timestamp como chave (igual ao original)
+                key = datetime.now(TZ_BR).strftime("%Y-%m-%d_%H-%M-%S-%f").replace('.', '')
+                db.reference(f"{path}/{key}").set(data)
+                print(f"🔥 [{nome_jogo.upper()}] {data['multiplier']}x às {data['time']}")
+            except Exception as e:
+                # Usa try/except para nunca quebrar
+                print(f"⚠️ Erro ao enviar para Firebase: {e}")
+            finally:
+                # Sempre chama task_done()
+                firebase_queue.task_done()
+                
+        except Exception as e:
+            # Proteção para o worker nunca morrer
+            print(f"⚠️ Erro genérico no Worker: {e}")
+            sleep(1)
 
 def verificar_modais_bloqueio(driver):
     """Fecha popups chatos"""
@@ -107,71 +125,76 @@ def verificar_modais_bloqueio(driver):
         except: pass
 
 # =============================================================
-# 🛠️ DRIVER E NAVEGAÇÃO
+# 🛠️ DRIVER E NAVEGAÇÃO (ULTRA-OTIMIZADO - ESTABILIDADE MÁXIMA)
 # =============================================================
 def initialize_driver_instance():
-    # Tenta matar processos antigos para liberar memória
     try:
-        if os.name == 'nt': # Windows
+        if os.name == 'nt': 
             subprocess.run("taskkill /f /im chromedriver.exe", shell=True, stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
             subprocess.run("taskkill /f /im chrome.exe", shell=True, stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
     except: pass
 
-options = webdriver.ChromeOptions()
-options.add_argument("--headless=new")
-options.add_argument("--no-sandbox")
-options.add_argument("--disable-dev-shm-usage")
-options.add_argument("--disable-gpu")
-options.add_argument("--disable-software-rasterizer")
-options.add_argument("--disable-features=VizDisplayCompositor")
-options.add_argument("--disable-extensions")
-options.add_argument("--disable-background-networking")
-options.add_argument("--disable-background-timer-throttling")
-options.add_argument("--disable-renderer-backgrounding")
-options.add_argument("--single-process")
-options.page_load_strategy = 'eager'
-    options.add_argument("=new") 
+    options = webdriver.ChromeOptions()
+    
+    # Opções que devem permanecer
+    options.add_argument("--headless=new") 
     options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-popup-blocking")
     options.add_argument("--window-size=1920,1080")
-    options.add_argument("--log-level=3")
-    options.add_argument("--silent")
-    options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36")
     
+    # OTIMIZAÇÕES AGRESSIVAS DE MEMÓRIA E ESTABILIDADE
+    options.add_argument("--disable-gpu")
+    options.add_argument("--disable-extensions")
+    options.add_argument("--disable-infobars")
+    options.add_argument("--disable-software-rasterizer")
+    options.add_argument("--blink-settings=imagesEnabled=false") # Desativa Imagens
+    options.add_argument("--disable-features=IsolateOrigins,site-per-process") 
+    options.add_argument("--disable-logging") 
+    options.add_argument("--disable-dev-shm-usage") # CRÍTICO EM CONTAINERS
+    options.add_argument("--single-process") # CRÍTICO PARA RAM/PROCESSOS
+    
+    options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit=537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36")
+    
+    driver = None
     try:
-        # Fallback para servidores Linux (Render/Heroku/VPS)
-        return webdriver.Chrome(service=Service("/usr/bin/chromedriver"), options=options)
-    except:
-        # Padrão
-        # service = Service(ChromeDriverManager().install()) # Remover se estiver usando VPS sem WDM
-        return webdriver.Chrome(options=options)
+        # Tenta usar o driver pré-instalado 
+        driver = webdriver.Chrome(service=Service("/usr/bin/chromedriver"), options=options)
+    except Exception as e:
+        print(f"⚠️ Aviso: Falha ao usar o driver em '/usr/bin/chromedriver'. Tentando fallback. Erro: {e}")
+        # Fallback 
+        driver = webdriver.Chrome(options=options)
+
+    # Adiciona um timeout de carregamento de página
+    driver.set_page_load_timeout(30) # 30 segundos
+    
+    return driver
 
 
 def setup_tabs_and_login(driver):
-    """Faz o login e configura as duas abas do navegador."""
+    """Faz o login e configura as duas abas do navegador com delays aumentados."""
     print("➡️ Acessando site e configurando abas...")
     
     # 1. Login na aba inicial
     try:
         driver.get(URL_DO_SITE)
-        sleep(3)
+        sleep(5) # Delay
         verificar_modais_bloqueio(driver)
 
         # CORREÇÃO CRÍTICA DO XPATH
         btns = driver.find_elements(By.XPATH, "//button[contains(., 'Entrar')] | //a[contains(@href, 'login')]") 
         if btns: 
             driver.execute_script("arguments[0].click();", btns[0])
-            sleep(1)
+            sleep(2) # Delay
             
         # Preenche e envia
         driver.find_element(By.NAME, "email").send_keys(EMAIL)
         driver.find_element(By.NAME, "password").send_keys(PASSWORD)
-        sleep(0.5)
+        sleep(1)
         driver.find_element(By.CSS_SELECTOR, "button[type='submit']").click()
         print("✅ Login enviado.")
-        sleep(5) 
+        sleep(10) # Delay SIGNIFICATIVO após o envio do login
     except Exception as e:
+        # Permite que o código continue no setup das abas, mesmo que o login tenha falhado/crashado
         print(f"⚠️ Aviso no login: {e}")
 
     # 2. Configura Abas
@@ -180,7 +203,7 @@ def setup_tabs_and_login(driver):
     # Aba 1 (Primeiro item da CONFIG_BOTS)
     config1 = CONFIG_BOTS[0]
     driver.get(config1["link"])
-    sleep(5)
+    sleep(15) # Delay SIGNIFICATIVO para carregamento da primeira aba
     handles[config1["firebase_path"]] = driver.current_window_handle
     print(f"✅ Aba {config1['nome']} configurada.")
 
@@ -191,7 +214,7 @@ def setup_tabs_and_login(driver):
     
     driver.switch_to.window(new_handle)
     driver.get(config2["link"])
-    sleep(5)
+    sleep(15) # Delay SIGNIFICATIVO para carregamento da segunda aba
     handles[config2["firebase_path"]] = driver.current_window_handle
     print(f"✅ Aba {config2['nome']} configurada.")
     
@@ -230,11 +253,8 @@ def start_bot_thread(driver, bot_config: dict, game_handle: str):
     firebase_path = bot_config['firebase_path']
     print(f"🚀 THREAD INICIADA: {nome_log} -> {firebase_path}")
 
-    # Tenta obter os elementos iniciais
     iframe, hist_element = find_game_elements(driver, game_handle)
-    if not iframe:
-        print(f"🚨 Falha inicial ao carregar {nome_log}. Tentando recuperar no loop...")
-
+    
     LAST_SENT = None
     ULTIMO_MULTIPLIER_TIME = time()
     
@@ -251,7 +271,7 @@ def start_bot_thread(driver, bot_config: dict, game_handle: str):
                 # Re-busca se os elementos sumiram
                 if not iframe or not hist_element:
                     iframe, hist_element = find_game_elements(driver, game_handle)
-                    if not iframe: raise Exception("Falha ao localizar elementos.")
+                    if not iframe: raise Exception("Reload")
 
                 # Tenta entrar no iframe
                 try: driver.switch_to.frame(iframe)
@@ -287,7 +307,12 @@ def start_bot_thread(driver, bot_config: dict, game_handle: str):
                         "date": now_br.strftime("%Y-%m-%d")
                     }
                     
-                    enviar_firebase_async(firebase_path, payload, nome_log)
+                    # 5) ENVIO SEM BLOQUEIO (ZERO DELAY / ZERO TRAVA)
+                    try:
+                        firebase_queue.put_nowait((firebase_path, payload, nome_log))
+                    except:
+                        # Se a fila estiver cheia, descarta silenciosamente (NUNCA TRAVA)
+                        pass
 
                     LAST_SENT = novo_valor
                     ULTIMO_MULTIPLIER_TIME = time()
@@ -313,6 +338,7 @@ def start_bot_thread(driver, bot_config: dict, game_handle: str):
 def rodar_ciclo_monitoramento():
     """Função que configura e roda um ciclo completo com threads até que precise reiniciar"""
     DRIVER = None
+    threads = []  # Inicia a lista antes do try para evitar erro no finally
     STOP_EVENT.clear() 
     
     try:
@@ -320,12 +346,12 @@ def rodar_ciclo_monitoramento():
         DRIVER = initialize_driver_instance()
         handles = setup_tabs_and_login(DRIVER)
         
-        threads = []
         for config in CONFIG_BOTS:
             path = config["firebase_path"]
             handle = handles.get(path)
             if handle:
-                t = threading.Thread(target=start_bot_thread, args=(DRIVER, config, handle))
+                # 6) Threads do Bot como daemon=True
+                t = threading.Thread(target=start_bot_thread, args=(DRIVER, config, handle), daemon=True)
                 t.start()
                 threads.append(t)
             else:
@@ -343,7 +369,7 @@ def rodar_ciclo_monitoramento():
         
     except Exception as e:
         print(f"\n❌ ERRO NO CICLO: {e}")
-        traceback.print_exc()
+        # traceback.print_exc() # Pode descomentar se precisar de detalhes
     finally:
         # Garante que as threads parem e o driver feche
         STOP_EVENT.set() 
@@ -363,8 +389,11 @@ if __name__ == "__main__":
         sys.exit()
     
     print("==============================================")
-    print("      GOATHBOT V6.1 - SUPERVISOR INICIADO     ")
+    print("      GOATHBOT V6.5 - SUPERVISOR INICIADO     ")
     print("==============================================")
+
+    # 4) Inicia o worker ÚNICO do Firebase
+    threading.Thread(target=firebase_worker, daemon=True).start()
 
     while True:
         try:
