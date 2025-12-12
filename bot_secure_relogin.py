@@ -16,17 +16,19 @@ import threading
 import sys
 import subprocess
 import traceback
-from queue import Queue  # <--- 1) IMPORT ADICIONADO
 
+from queue import Queue
 # =============================================================
 # ⚠️ CONTROLE GLOBAL DE THREADS E DRIVER
 # =============================================================
 DRIVER_LOCK = threading.Lock() 
 STOP_EVENT = threading.Event() 
 
-# <--- 2) FILA GLOBAL PARA OTIMIZAÇÃO DE MEMÓRIA
-firebase_queue = Queue(maxsize=1000)
 
+# =============================================================
+# 📬 FILA GLOBAL FIREBASE (NÃO BLOQUEANTE)
+# =============================================================
+firebase_queue = Queue(maxsize=1000)
 # =============================================================
 # 🔥 GOATHBOT V6.1 - DUAL MODE (UNIFICADO E CORRIGIDO)
 # =============================================================
@@ -61,7 +63,7 @@ POLLING_INTERVAL = 0.1
 TEMPO_MAX_INATIVIDADE = 360     # 6 minutos
 
 # =============================================================
-# 🔧 FIREBASE & WORKER
+# 🔧 FIREBASE
 # =============================================================
 try:
     if not firebase_admin._apps:
@@ -81,32 +83,33 @@ def getColorClass(value):
         return "default-bg"
     except: return "default-bg"
 
-# <--- 4) WORKER ÚNICO E PERSISTENTE
-def firebase_worker():
-    """Worker único que consome a fila e envia para o Firebase."""
-    print("🔥 WORKER FIREBASE INICIADO (Modo Persistente)")
-    while True:
-        try:
-            # Pega item da fila (bloqueia se vazia, eficiente para CPU)
-            item = firebase_queue.get()
-            path, data, nome_jogo = item
-            
-            try:
-                # Gera chave única baseada no momento do envio
-                key = datetime.now(TZ_BR).strftime("%Y-%m-%d_%H-%M-%S-%f").replace('.', '')
-                db.reference(f"{path}/{key}").set(data)
-                print(f"🔥 [{nome_jogo.upper()}] {data['multiplier']}x às {data['time']}")
-            except Exception as e:
-                print(f"⚠️ Erro ao enviar para Firebase: {e}")
-            finally:
-                firebase_queue.task_done()
-                
-        except Exception as e:
-            # Proteção para o worker nunca morrer
-            print(f"⚠️ Erro genérico no Worker: {e}")
-            sleep(1)
 
-# (A função enviar_firebase_async FOI REMOVIDA AQUI - Item 3)
+def firebase_worker():
+    """Worker persistente: consome a fila e envia ao Firebase sem travar o loop principal."""
+    while True:
+        item = None
+        try:
+            item = firebase_queue.get()  # bloqueia apenas o worker
+            firebase_path, payload, nome_jogo = item
+
+            # Usando timestamp como chave para garantir unicidade (mesmo padrão do original)
+            key = datetime.now(TZ_BR).strftime("%Y-%m-%d_%H-%M-%S-%f").replace('.', '')
+            db.reference(f"{firebase_path}/{key}").set(payload)
+            try:
+                print(f"🔥 [{str(nome_jogo).upper()}] {payload.get('multiplier')}x às {payload.get('time')}")
+            except Exception:
+                pass
+        except Exception:
+            pass
+        finally:
+            if item is not None:
+                try:
+                    firebase_queue.task_done()
+                except Exception:
+                    pass
+
+threading.Thread(target=firebase_worker, daemon=True).start()
+
 
 def verificar_modais_bloqueio(driver):
     """Fecha popups chatos"""
@@ -294,12 +297,9 @@ def start_bot_thread(driver, bot_config: dict, game_handle: str):
                         "color": getColorClass(novo_valor),
                         "date": now_br.strftime("%Y-%m-%d")
                     }
-                    
-                    # <--- 5) ENVIO OTIMIZADO (NON-BLOCKING)
                     try:
                         firebase_queue.put_nowait((firebase_path, payload, nome_log))
                     except:
-                        # Se a fila estiver cheia (net lenta), descarta para não travar o bot
                         pass
 
                     LAST_SENT = novo_valor
@@ -338,7 +338,6 @@ def rodar_ciclo_monitoramento():
             path = config["firebase_path"]
             handle = handles.get(path)
             if handle:
-                # <--- 6) THREADS DO BOT COMO DAEMON (BOA PRÁTICA)
                 t = threading.Thread(target=start_bot_thread, args=(DRIVER, config, handle), daemon=True)
                 t.start()
                 threads.append(t)
@@ -380,9 +379,6 @@ if __name__ == "__main__":
     print("      GOATHBOT V6.1 - SUPERVISOR INICIADO     ")
     print("==============================================")
 
-    # <--- INICIALIZAÇÃO ÚNICA DO WORKER
-    threading.Thread(target=firebase_worker, daemon=True).start()
-
     while True:
         try:
             rodar_ciclo_monitoramento()
@@ -394,4 +390,3 @@ if __name__ == "__main__":
         except Exception as e:
             print(f"❌ Erro crítico no Supervisor: {e}")
             sleep(10)
-        
