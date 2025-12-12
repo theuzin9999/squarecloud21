@@ -17,32 +17,41 @@ import traceback
 from queue import Queue
 
 # =============================================================
-# 🔒 CONTROLE GLOBAL
+# 🔒 CONTROLES GLOBAIS
 # =============================================================
 DRIVER_LOCK = threading.Lock()
 STOP_EVENT = threading.Event()
 
 # =============================================================
-# 🔥 CONFIGURAÇÕES
+# ⚙️ CONFIGURAÇÕES
 # =============================================================
-SERVICE_ACCOUNT_FILE = 'serviceAccountKey.json'
-DATABASE_URL = 'https://history-dashboard-a70ee-default-rtdb.firebaseio.com'
+SERVICE_ACCOUNT_FILE = "serviceAccountKey.json"
+DATABASE_URL = "https://history-dashboard-a70ee-default-rtdb.firebaseio.com"
 URL_DO_SITE = "https://www.goathbet.com"
 
 CONFIG_BOTS = [
-    {"nome": "ORIGINAL", "link": "https://www.goathbet.com/pt/casino/spribe/aviator", "firebase_path": "history"},
-    {"nome": "AVIATOR 2", "link": "https://www.goathbet.com/pt/casino/spribe/aviator-2", "firebase_path": "aviator2"}
+    {
+        "nome": "ORIGINAL",
+        "link": "https://www.goathbet.com/pt/casino/spribe/aviator",
+        "firebase_path": "history"
+    },
+    {
+        "nome": "AVIATOR 2",
+        "link": "https://www.goathbet.com/pt/casino/spribe/aviator-2",
+        "firebase_path": "aviator2"
+    }
 ]
 
 EMAIL = os.getenv("EMAIL")
 PASSWORD = os.getenv("PASSWORD")
 
 TZ_BR = pytz.timezone("America/Sao_Paulo")
-POLLING_INTERVAL = 0.1
-TEMPO_MAX_INATIVIDADE = 360
+
+POLLING_INTERVAL = 0.1        # mantido conforme pedido
+TEMPO_MAX_INATIVIDADE = 360   # 6 minutos
 
 # =============================================================
-# 🔥 FIREBASE (FILA SEGURA)
+# 🔥 FIREBASE (FILA SEGURA – SEM VAZAMENTO)
 # =============================================================
 firebase_queue = Queue(maxsize=1000)
 
@@ -66,19 +75,19 @@ threading.Thread(target=firebase_worker, daemon=True).start()
 try:
     if not firebase_admin._apps:
         cred = credentials.Certificate(SERVICE_ACCOUNT_FILE)
-        firebase_admin.initialize_app(cred, {'databaseURL': DATABASE_URL})
+        firebase_admin.initialize_app(cred, {"databaseURL": DATABASE_URL})
     print("✅ Firebase conectado.")
 except Exception as e:
-    print(f"❌ Firebase falhou: {e}")
+    print(f"❌ Erro Firebase: {e}")
     sys.exit()
 
 # =============================================================
 # 🧠 UTIL
 # =============================================================
-def getColorClass(value):
-    if 1 <= value < 2: return "blue-bg"
-    if 2 <= value < 10: return "purple-bg"
-    if value >= 10: return "magenta-bg"
+def getColorClass(v):
+    if 1 <= v < 2: return "blue-bg"
+    if 2 <= v < 10: return "purple-bg"
+    if v >= 10: return "magenta-bg"
     return "default-bg"
 
 # =============================================================
@@ -88,13 +97,15 @@ def initialize_driver():
     try:
         subprocess.run("pkill chrome", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         subprocess.run("pkill chromedriver", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    except: pass
+    except:
+        pass
 
     options = webdriver.ChromeOptions()
     options.add_argument("--headless=new")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--window-size=1920,1080")
+    options.add_argument("--log-level=3")
 
     try:
         return webdriver.Chrome(service=Service("/usr/bin/chromedriver"), options=options)
@@ -113,7 +124,8 @@ def setup_tabs(driver):
         driver.find_element(By.NAME, "password").send_keys(PASSWORD)
         driver.find_element(By.CSS_SELECTOR, "button[type='submit']").click()
         sleep(5)
-    except: pass
+    except:
+        pass
 
     handles = {}
     for cfg in CONFIG_BOTS:
@@ -126,22 +138,28 @@ def setup_tabs(driver):
     return handles
 
 # =============================================================
-# 🎮 LOOP
+# 🎮 LOOP DE CAPTURA
 # =============================================================
 def start_bot(driver, cfg, handle):
     LAST = None
     LAST_TIME = time()
 
     while not STOP_EVENT.is_set():
+        raw = None
+
         with DRIVER_LOCK:
             try:
                 driver.switch_to.window(handle)
                 iframe = driver.find_element(By.XPATH, '//iframe[contains(@src,"spribe")]')
                 driver.switch_to.frame(iframe)
-                el = driver.find_element(By.CSS_SELECTOR, ".payout:first-child")
-                raw = el.text.replace("x","").replace(",",".")
+                el = driver.find_element(By.CSS_SELECTOR, ".payout:first-child, .bubble-multiplier:first-child")
+                raw = el.text.replace("x", "").replace(",", ".")
             except:
-                continue
+                pass
+
+        if not raw:
+            sleep(POLLING_INTERVAL)
+            continue
 
         try:
             val = float(raw)
@@ -165,8 +183,8 @@ def start_bot(driver, cfg, handle):
             STOP_EVENT.set()
             return
 
-        # Reinício diário (23:59 - 00:05)
-        if now.hour == 23 and now.minute >= 59 or now.hour == 0 and now.minute <= 5:
+        # Reinício diário (23:59 → 00:05)
+        if (now.hour == 23 and now.minute >= 59) or (now.hour == 0 and now.minute <= 5):
             STOP_EVENT.set()
             return
 
@@ -178,36 +196,55 @@ def start_bot(driver, cfg, handle):
 def run():
     STOP_EVENT.clear()
     driver = None
+    threads = []
 
     try:
         driver = initialize_driver()
         handles = setup_tabs(driver)
 
-        threads = []
         for cfg in CONFIG_BOTS:
-            t = threading.Thread(target=start_bot, args=(driver, cfg, handles[cfg["firebase_path"]]))
+            t = threading.Thread(
+                target=start_bot,
+                args=(driver, cfg, handles[cfg["firebase_path"]]),
+                daemon=True
+            )
             t.start()
             threads.append(t)
 
         while not STOP_EVENT.is_set():
             sleep(1)
 
+    except Exception:
+        traceback.print_exc()
+
     finally:
         STOP_EVENT.set()
         for t in threads:
             t.join(timeout=2)
+
         if driver:
-            driver.quit()
+            try:
+                driver.quit()
+            except:
+                pass
+
         sleep(5)
 
 # =============================================================
 # ▶️ MAIN
 # =============================================================
 if __name__ == "__main__":
+    if not EMAIL or not PASSWORD:
+        print("❌ Configure EMAIL e PASSWORD nas variáveis de ambiente.")
+        sys.exit()
+
+    print("🚀 BOT INICIADO")
+
     while True:
         try:
             run()
-            print("♻️ Reiniciando...")
+            print("♻️ Reiniciando ciclo...")
             sleep(5)
         except KeyboardInterrupt:
+            print("⛔ Encerrado manualmente.")
             break
