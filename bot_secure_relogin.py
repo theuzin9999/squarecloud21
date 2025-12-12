@@ -118,16 +118,19 @@ def initialize_driver_instance():
     except: pass
 
     options = webdriver.ChromeOptions()
-options.add_argument('--headless=new')
-options.add_argument('--single-process')
-options.add_argument('--disable-renderer-backgrounding')
-options.add_argument('--disable-background-timer-throttling')
-options.add_argument('--disable-background-networking')
-options.add_argument('--disable-extensions')
-options.add_argument('--disable-features=VizDisplayCompositor')
-options.add_argument('--disable-software-rasterizer')
-options.add_argument('--disable-gpu')
-    options.page_load_strategy = 'eager'
+options.add_argument("--headless=new")
+options.add_argument("--no-sandbox")
+options.add_argument("--disable-dev-shm-usage")
+options.add_argument("--disable-gpu")
+options.add_argument("--disable-software-rasterizer")
+options.add_argument("--disable-features=VizDisplayCompositor")
+options.add_argument("--disable-extensions")
+options.add_argument("--disable-background-networking")
+options.add_argument("--disable-background-timer-throttling")
+options.add_argument("--disable-renderer-backgrounding")
+options.add_argument("--single-process")
+options.page_load_strategy = 'eager'
+
     options.add_argument("=new") 
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
