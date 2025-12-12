@@ -17,7 +17,7 @@ import sys
 import subprocess 
 
 # =============================================================
-# 🔥 GOATHBOT V6.7 - DUAL MONITORING (CHECK DE PRESENÇA)
+# 🔥 GOATHBOT V6.8 - DUAL MONITORING (SELECTORS REFORÇADOS)
 # =============================================================
 SERVICE_ACCOUNT_FILE = 'serviceAccountKey.json'
 DATABASE_URL = 'https://history-dashboard-a70ee-default-rtdb.firebaseio.com'
@@ -192,7 +192,7 @@ def run_single_bot(bot_config):
             if iframe is None:
                 raise Exception("Falha na inicialização do Iframe.")
             
-            # 2. **NOVO**: FORÇA ESPERA PELO CONTEÚDO DO JOGO
+            # 2. FORÇA ESPERA PELO CONTEÚDO DO JOGO
             try:
                 # Foca o iframe
                 driver.switch_to.default_content()
@@ -205,24 +205,24 @@ def run_single_bot(bot_config):
                 print(f"[{nome}] ✅ Elementos de leitura confirmados.")
                 
             except TimeoutException:
-                # Se não carregou, reinicia o ciclo
                 raise Exception("Timeout: Elementos de histórico não carregaram após 10s.")
             except Exception as e:
-                # Erro genérico
                 raise Exception(f"Erro ao confirmar elementos: {e}")
 
-            # Se chegou aqui, o bot está pronto para monitorar
             print(f"🚀 [{nome}] MONITORANDO EM '{path_fb}'")
             
             LAST_SENT = None
             ULTIMO_MULTIPLIER_TIME = time()
             
-            # Seletor global robusto
-            SELECTOR_MULTIPLIER = "app-stats-widget .bubble-multiplier:first-child, .payouts-block .payout:first-child, .bubble-multiplier, .payout"
+            # NOVO SELETOR: Garante que pegue o primeiro item da lista de históricos.
+            # O "primeiro filho" (first-child) é geralmente o resultado mais recente CONCLUÍDO.
+            # Estamos simplificando e priorizando a estrutura de lista de resultados.
+            SELECTOR_MULTIPLIER = ".payouts-block .payout:first-child, app-stats-widget .bubble-multiplier:first-child"
             
             while True: # Loop Leitura
                 now_br = datetime.now(TZ_BR)
                 
+                # REINÍCIO DIÁRIO: 00:00 a 00:05
                 if now_br.hour == 0 and now_br.minute <= 5 and (relogin_date != now_br.date()):
                     print(f"🌙 [{nome}] Reinício diário.")
                     relogin_date = now_br.date()
@@ -239,8 +239,8 @@ def run_single_bot(bot_config):
                     payouts = driver.find_elements(By.CSS_SELECTOR, SELECTOR_MULTIPLIER)
                     
                     if not payouts:
-                        # Com o check forçado acima, essa condição raramente será atingida, 
-                        # prevenindo o loop silencioso.
+                        # LOG DETALHADO: Ajuda a rastrear se o elemento sumiu
+                        print(f"[{nome}] ❓ Payouts vazios. Tentando novamente.") 
                         sleep(POLLING_INTERVAL)
                         continue 
                     
@@ -256,6 +256,12 @@ def run_single_bot(bot_config):
                     except ValueError:
                         sleep(POLLING_INTERVAL)
                         continue
+                    
+                    # LOG DE RASTREIO: Mostra o que ele leu, mesmo que não salve
+                    # Se o ORIGINAL estiver lendo 1.00x repetidamente, isso irá aparecer
+                    if nome == "ORIGINAL":
+                         print(f"[{nome}] LIDO: {novo:.2f}x | ÚLTIMO SALVO: {LAST_SENT} | DIFERENTE?: {novo != LAST_SENT}")
+
                     
                     if novo != LAST_SENT:
                         ULTIMO_MULTIPLIER_TIME = time()
@@ -284,7 +290,6 @@ def run_single_bot(bot_config):
                         iframe = iframe_new
                         continue
                     else:
-                        # Se não conseguir, força o reinício completo
                         raise Exception("Iframe irrecuperável.")
 
                 except Exception as e:
@@ -303,7 +308,7 @@ if __name__ == "__main__":
         sys.exit(1)
     
     print("==============================================")
-    print("    GOATHBOT V6.7 - DUAL MONITORING (ESTÁVEL)")
+    print("    GOATHBOT V6.8 - DUAL MONITORING (SELECTORS)")
     print("==============================================")
 
     threads = []
