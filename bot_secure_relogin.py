@@ -3,7 +3,7 @@ from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
-# REMOVIDO: from webdriver_manager.chrome import ChromeDriverManager
+from webdriver_manager.chrome import ChromeDriverManager
 from time import sleep, time
 from datetime import datetime
 from selenium.common.exceptions import StaleElementReferenceException, TimeoutException, NoSuchElementException
@@ -53,7 +53,7 @@ PASSWORD = os.getenv("PASSWORD")
 TZ_BR = pytz.timezone("America/Sao_Paulo")
 
 # Configurações Turbo
-POLLING_INTERVAL = 0.1          # MANTIDO o valor de 100ms
+POLLING_INTERVAL = 0.1          
 TEMPO_MAX_INATIVIDADE = 360     # 6 minutos
 
 # =============================================================
@@ -107,65 +107,34 @@ def verificar_modais_bloqueio(driver):
         except: pass
 
 # =============================================================
-# 🛠️ DRIVER E NAVEGAÇÃO - MAIS OTIMIZAÇÕES AGRESSIVAS
+# 🛠️ DRIVER E NAVEGAÇÃO
 # =============================================================
-def kill_driver_processes():
-    """Tenta matar processos do Chrome/ChromeDriver para liberar memória (Windows/Linux)."""
+def initialize_driver_instance():
+    # Tenta matar processos antigos para liberar memória
     try:
         if os.name == 'nt': # Windows
             subprocess.run("taskkill /f /im chromedriver.exe", shell=True, stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
             subprocess.run("taskkill /f /im chrome.exe", shell=True, stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
-        elif os.name == 'posix': # Linux/MacOS (padrão em VPS/Containers)
-            # Reforçado com -9 para SIGKILL
-            subprocess.run("pkill -9 -f 'chromedriver|chrome'", shell=True, stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
-        print("🧹 Tentativa de limpeza de processos concluída.")
-    except: 
-        pass
-
-def initialize_driver_instance():
-    # Tenta matar processos antigos para liberar memória
-    kill_driver_processes() 
+    except: pass
 
     options = webdriver.ChromeOptions()
     options.page_load_strategy = 'eager'
-    
-    # === CRÍTICO PARA AMBIENTES HEADLESS (Corrige SessionNotCreatedException) ===
     options.add_argument("--headless=new") 
-    options.add_argument("--no-sandbox") 
-    options.add_argument("--disable-dev-shm-usage") 
-    options.add_argument("--remote-debugging-port=9222") 
-    options.add_argument("--single-process") 
-    
-    # 💥 NOVAS FLAGS AGRESSIVAS PARA ESTABILIDADE E MEMÓRIA
-    options.add_argument("--shm-size=2g") # Aloca 2GB para shm
-    options.add_argument('--disable-site-isolation-trials') # Reduz a complexidade de processos
-    # === FIM CRÍTICO ===
-    
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-popup-blocking")
     options.add_argument("--window-size=1920,1080")
     options.add_argument("--log-level=3")
     options.add_argument("--silent")
     options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36")
     
-    # OPÇÕES PARA REDUZIR CONSUMO DE MEMÓRIA (RAM)
-    options.add_argument('--disable-gpu')
-    options.add_argument('--disable-browser-side-navigation')
-    options.add_argument('--disable-software-rasterizer')
-    options.add_argument('--disable-features=NetworkService,NetworkServiceInProcess')
-    options.add_argument('--disk-cache-size=0') 
-    
     try:
-        # Tenta o caminho mais simples, confiando no PATH do Square Cloud para o ChromeDriver
+        # Fallback para servidores Linux (Render/Heroku/VPS)
+        return webdriver.Chrome(service=Service("/usr/bin/chromedriver"), options=options)
+    except:
+        # Padrão
+        # service = Service(ChromeDriverManager().install()) # Remover se estiver usando VPS sem WDM
         return webdriver.Chrome(options=options)
-    except Exception as e:
-        print(f"❌ ERRO CRÍTICO NA INICIALIZAÇÃO DO DRIVER. Erro: {e}")
-        # Tenta o caminho explícito do Linux/VPS como ÚLTIMO recurso
-        try:
-             # Usa o Service explícito se o anterior falhar
-             return webdriver.Chrome(service=Service("/usr/bin/chromedriver"), options=options)
-        except Exception as fallback_e:
-            print(f"❌ FALHA DE FALLBACK: Não foi possível iniciar o driver. Erro: {fallback_e}")
-            raise
 
 
 def setup_tabs_and_login(driver):
@@ -334,13 +303,13 @@ def rodar_ciclo_monitoramento():
     """Função que configura e roda um ciclo completo com threads até que precise reiniciar"""
     DRIVER = None
     STOP_EVENT.clear() 
-    threads = [] 
     
     try:
         print("\n🔵 INICIANDO NOVO CICLO DO NAVEGADOR...")
         DRIVER = initialize_driver_instance()
         handles = setup_tabs_and_login(DRIVER)
         
+        threads = []
         for config in CONFIG_BOTS:
             path = config["firebase_path"]
             handle = handles.get(path)
@@ -365,23 +334,16 @@ def rodar_ciclo_monitoramento():
         print(f"\n❌ ERRO NO CICLO: {e}")
         traceback.print_exc()
     finally:
-        # Garante que as threads parem
+        # Garante que as threads parem e o driver feche
         STOP_EVENT.set() 
         for t in threads:
-            # Aumentado timeout de join para 5s para dar tempo às threads finalizarem
-            if t.is_alive(): t.join(timeout=5) 
+            if t.is_alive(): t.join(timeout=2) 
 
         if DRIVER:
             try:
-                DRIVER.quit() 
+                DRIVER.quit()
                 print("🗑️ Driver encerrado com sucesso.")
-            except: 
-                print("⚠️ Aviso: Falha ao encerrar DRIVER. Tentando forçar limpeza...")
-                pass
-        
-        # 🧹 Limpeza agressiva final para matar processos zumbis
-        kill_driver_processes() 
-        
+            except: pass
         sleep(5) 
 
 if __name__ == "__main__":
