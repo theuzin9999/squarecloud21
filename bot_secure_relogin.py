@@ -130,15 +130,14 @@ options.add_argument("--disable-background-timer-throttling")
 options.add_argument("--disable-renderer-backgrounding")
 options.add_argument("--single-process")
 options.page_load_strategy = 'eager'
-
-    options.add_argument("=new") 
-    options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
-    options.add_argument("--disable-popup-blocking")
-    options.add_argument("--window-size=1920,1080")
-    options.add_argument("--log-level=3")
-    options.add_argument("--silent")
-    options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36")
+options.add_argument("=new") 
+options.add_argument("--no-sandbox")
+options.add_argument("--disable-dev-shm-usage")
+options.add_argument("--disable-popup-blocking")
+options.add_argument("--window-size=1920,1080")
+options.add_argument("--log-level=3")
+options.add_argument("--silent")
+options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36")
     
     try:
         # Fallback para servidores Linux (Render/Heroku/VPS)
