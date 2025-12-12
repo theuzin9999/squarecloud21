@@ -115,8 +115,9 @@ def kill_driver_processes():
         if os.name == 'nt': # Windows
             subprocess.run("taskkill /f /im chromedriver.exe", shell=True, stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
             subprocess.run("taskkill /f /im chrome.exe", shell=True, stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
-        elif os.name == 'posix': # Linux/MacOS (padrão em VPS)
-            subprocess.run("pkill -f 'chromedriver|chrome'", shell=True, stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
+        elif os.name == 'posix': # Linux/MacOS (padrão em VPS/Containers)
+            # Sinal 9 (SIGKILL) é mais agressivo para garantir a morte do processo.
+            subprocess.run("pkill -9 -f 'chromedriver|chrome'", shell=True, stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
         print("🧹 Tentativa de limpeza de processos concluída.")
     except: 
         pass
@@ -127,16 +128,21 @@ def initialize_driver_instance():
 
     options = webdriver.ChromeOptions()
     options.page_load_strategy = 'eager'
+    
+    # === CRÍTICO PARA AMBIENTES HEADLESS (Corrige SessionNotCreatedException) ===
     options.add_argument("--headless=new") 
-    options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--no-sandbox") # Essencial para rodar em containers Linux/Square Cloud
+    options.add_argument("--disable-dev-shm-usage") # Evita problemas de memória/renderização em containers
+    options.add_argument("--remote-debugging-port=9222") # Ajuda a estabilizar a conexão com o renderizador
+    # === FIM CRÍTICO ===
+    
     options.add_argument("--disable-popup-blocking")
     options.add_argument("--window-size=1920,1080")
     options.add_argument("--log-level=3")
     options.add_argument("--silent")
     options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36")
     
-    # 💡 NOVAS OPÇÕES PARA REDUZIR CONSUMO DE MEMÓRIA (RAM)
+    # OPÇÕES PARA REDUZIR CONSUMO DE MEMÓRIA (RAM)
     options.add_argument('--disable-gpu')
     options.add_argument('--disable-browser-side-navigation')
     options.add_argument('--disable-software-rasterizer')
@@ -144,12 +150,15 @@ def initialize_driver_instance():
     options.add_argument('--disk-cache-size=0') # Desativa cache em disco
     
     try:
-        # Fallback para servidores Linux (Render/Heroku/VPS)
-        return webdriver.Chrome(service=Service("/usr/bin/chromedriver"), options=options)
-    except:
-        # Padrão
-        # service = Service(ChromeDriverManager().install()) # Remover se estiver usando VPS sem WDM
+        # Padrão: O Selenium tenta achar o ChromeDriver no PATH (padrão em containers)
         return webdriver.Chrome(options=options)
+    except Exception as e:
+        # Se falhar no padrão, tenta o caminho explícito do Linux/VPS (fallback)
+        try:
+             return webdriver.Chrome(service=Service("/usr/bin/chromedriver"), options=options)
+        except Exception as fallback_e:
+            print(f"❌ ERRO CRÍTICO NA INICIALIZAÇÃO DO DRIVER. Verifique se o ChromeDriver está instalado e no PATH. Erro: {fallback_e}")
+            raise # Re-lança para que o supervisor tente reiniciar
 
 
 def setup_tabs_and_login(driver):
@@ -319,7 +328,7 @@ def rodar_ciclo_monitoramento():
     """Função que configura e roda um ciclo completo com threads até que precise reiniciar"""
     DRIVER = None
     STOP_EVENT.clear() 
-    threads = [] # Inicializa a lista aqui para garantir que existe no finally
+    threads = [] 
     
     try:
         print("\n🔵 INICIANDO NOVO CICLO DO NAVEGADOR...")
@@ -350,7 +359,7 @@ def rodar_ciclo_monitoramento():
         print(f"\n❌ ERRO NO CICLO: {e}")
         traceback.print_exc()
     finally:
-        # Garante que as threads parem e o driver feche
+        # Garante que as threads parem
         STOP_EVENT.set() 
         for t in threads:
             # Aumentado timeout de join para 5s para dar tempo às threads finalizarem
