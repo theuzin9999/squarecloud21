@@ -130,7 +130,6 @@ options.add_argument("--disable-background-timer-throttling")
 options.add_argument("--disable-renderer-backgrounding")
 options.add_argument("--single-process")
 options.page_load_strategy = 'eager'
-
     options.add_argument("=new") 
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
