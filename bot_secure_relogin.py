@@ -17,7 +17,7 @@ import sys
 import subprocess 
 
 # =============================================================
-# 🔥 GOATHBOT V6.9 - DUAL MONITORING (ESTABILIDADE MÁXIMA)
+# 🔥 GOATHBOT V7.1 - DUAL MONITORING (COMPATIBILIDADE MÁXIMA)
 # =============================================================
 SERVICE_ACCOUNT_FILE = 'serviceAccountKey.json'
 DATABASE_URL = 'https://history-dashboard-a70ee-default-rtdb.firebaseio.com'
@@ -45,9 +45,9 @@ EMAIL = os.getenv("EMAIL")
 PASSWORD = os.getenv("PASSWORD")
 TZ_BR = pytz.timezone("America/Sao_Paulo")
 
-POLLING_INTERVAL = 0.1 
+POLLING_INTERVAL = 0.2 # Aumentado para 0.2s
 TEMPO_MAX_INATIVIDADE = 360  
-MAX_EMPTY_PAYOUTS_COUNT = 200 # 20 segundos de falha antes de reiniciar (200 * 0.1s)
+MAX_EMPTY_PAYOUTS_COUNT = 100 # Reduzido para 10s de falha (100 * 0.1s) antes de reiniciar o driver
 
 # =============================================================
 # 🔧 FIREBASE
@@ -67,6 +67,7 @@ except Exception as e:
 def start_driver(nome_bot):
     """Inicia o driver isolado."""
     try:
+        # Tenta matar processos antigos para garantir um início limpo
         subprocess.run("taskkill /f /im chromedriver.exe", shell=True, check=True, stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
     except: pass 
 
@@ -145,7 +146,6 @@ def initialize_game_elements(driver, nome_bot):
     iframe = None
     try:
         print(f"[{nome_bot}] 🔎 Buscando Iframe...")
-        # Aumentei a espera para 20s
         iframe = WebDriverWait(driver, 20).until(
             EC.presence_of_element_located((By.XPATH, '//iframe[contains(@src, "spribe") or contains(@src, "aviator")]'))
         )
@@ -215,8 +215,8 @@ def run_single_bot(bot_config):
             LAST_SENT = None
             ULTIMO_MULTIPLIER_TIME = time()
             
-            # SELETOR REFORÇADO (Mais genérico para resultados)
-            SELECTOR_MULTIPLIER = "app-stats-widget .bubble-multiplier, .payouts-block .payout"
+            # NOVO SELETOR: Combinação de todos os nomes de classes conhecidos que representam uma "bolha" de resultado.
+            SELECTOR_MULTIPLIER = ".payouts-block .payout, app-stats-widget .bubble-multiplier"
             CONSECUTIVE_EMPTY_PAYOUTS = 0
             
             while True: # Loop Leitura
@@ -232,25 +232,27 @@ def run_single_bot(bot_config):
                     raise Exception("Inatividade detectada")
 
                 try:
-                    # Garante foco no iframe
+                    # REFORÇO DE FOCO: Garante foco no iframe a cada loop
                     driver.switch_to.default_content()
                     driver.switch_to.frame(iframe) 
                     
+                    # Usa find_elements para pegar TODOS os multiplicadores
                     payouts = driver.find_elements(By.CSS_SELECTOR, SELECTOR_MULTIPLIER)
                     
                     if not payouts:
-                        # NOVO: Conta a falha e força o reinício se o limite for atingido
                         CONSECUTIVE_EMPTY_PAYOUTS += 1
                         if CONSECUTIVE_EMPTY_PAYOUTS > MAX_EMPTY_PAYOUTS_COUNT:
+                             # Reinicia se falhar em encontrar o elemento por 20s
                              raise Exception(f"Elemento de histórico não encontrado após {MAX_EMPTY_PAYOUTS_COUNT * POLLING_INTERVAL:.1f}s. Reiniciando driver.")
                              
-                        print(f"[{nome}] ❓ Payouts vazios (Tentativa {CONSECUTIVE_EMPTY_PAYOUTS}).") 
+                        # Se não encontrar, tenta focar o iframe novamente como segurança extra
                         sleep(POLLING_INTERVAL)
                         continue 
                     
                     # Reset o contador se a leitura foi bem-sucedida
                     CONSECUTIVE_EMPTY_PAYOUTS = 0
                     
+                    # Pegamos sempre o PRIMEIRO elemento da lista, que é o mais recente.
                     raw_text = payouts[0].get_attribute("innerText")
                     clean_text = raw_text.strip().lower().replace('x', '')
 
@@ -261,10 +263,12 @@ def run_single_bot(bot_config):
                     try:
                         novo = float(clean_text)
                     except ValueError:
+                        # Se o texto não for um número (ex: "Voando...", ou vazio), ignora
                         sleep(POLLING_INTERVAL)
                         continue
                     
-                    if nome == "ORIGINAL":
+                    # LOG DE RASTREIO: Mostra o que ele leu, mesmo que não salve
+                    if nome == "ORIGINAL" and novo != LAST_SENT:
                          print(f"[{nome}] LIDO: {novo:.2f}x | ÚLTIMO SALVO: {LAST_SENT} | DIFERENTE?: {novo != LAST_SENT}")
 
                     
@@ -313,7 +317,7 @@ if __name__ == "__main__":
         sys.exit(1)
     
     print("==============================================")
-    print("    GOATHBOT V6.9 - DUAL MONITORING (FINAL)")
+    print("    GOATHBOT V7.1 - DUAL MONITORING (FINAL)")
     print("==============================================")
 
     threads = []
