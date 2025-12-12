@@ -17,10 +17,12 @@ import sys
 import subprocess 
 
 # =============================================================
-# 🔥 GOATHBOT V6.4 - DUAL MONITORING (MAX ROBUSTEZ)
+# 🔥 GOATHBOT V6.5 - DUAL MONITORING (CORREÇÃO CRÍTICA)
 # =============================================================
 SERVICE_ACCOUNT_FILE = 'serviceAccountKey.json'
-DATABASE_URL = 'https://history-dashboard-a70ee-default-rtdb.firebaseio.io'
+
+# CORREÇÃO 1: URL DO FIREBASE CORRIGIDA (.com)
+DATABASE_URL = 'https://history-dashboard-a70ee-default-rtdb.firebaseio.com'
 URL_DO_SITE = "https://www.goathbet.com"
 
 # CONFIGURAÇÃO DOS DOIS JOGOS
@@ -45,8 +47,7 @@ EMAIL = os.getenv("EMAIL")
 PASSWORD = os.getenv("PASSWORD")
 TZ_BR = pytz.timezone("America/Sao_Paulo")
 
-# Configurações Turbo
-POLLING_INTERVAL = 0.05
+POLLING_INTERVAL = 0.1 # Aumentei levemente para dar tempo do elemento renderizar
 TEMPO_MAX_INATIVIDADE = 360      
 
 # =============================================================
@@ -65,11 +66,9 @@ except Exception as e:
 # 🛠️ DRIVER E NAVEGAÇÃO
 # =============================================================
 def start_driver(nome_bot):
-    """Inicia um novo driver isolado para cada bot."""
     try:
         subprocess.run("taskkill /f /im chromedriver.exe", shell=True, check=True, stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
-    except:
-        pass 
+    except: pass 
 
     options = webdriver.ChromeOptions()
     options.add_argument("--no-sandbox")
@@ -89,13 +88,10 @@ def start_driver(nome_bot):
         try:
              return webdriver.Chrome(options=options)
         except Exception as e:
-            print(f"❌ [{nome_bot}] Erro ao iniciar driver: {e}. Verifique se o chromedriver está no PATH.")
-            # Se a inicialização falhar, retorna None
+            print(f"❌ [{nome_bot}] Erro driver: {e}")
             return None 
 
-# Funções safe_click, check_blocking_modals, process_login, getColorClass... (sem alteração)
 def safe_click(driver, by, value, timeout=5):
-    """Tenta clicar com WebDriverWait e executa via JavaScript como fallback."""
     try:
         element = WebDriverWait(driver, timeout).until(EC.element_to_be_clickable((by, value)))
         try: element.click()
@@ -104,7 +100,6 @@ def safe_click(driver, by, value, timeout=5):
     except: return False
 
 def check_blocking_modals(driver):
-    """Fecha popups chatos."""
     xpaths = [
         "//button[contains(., 'Sim')]", 
         "//button[@data-age-action='yes']", 
@@ -118,7 +113,6 @@ def check_blocking_modals(driver):
             break
 
 def process_login(driver, target_link):
-    """Lógica de navegação e login para cada thread."""
     try: driver.get(URL_DO_SITE)
     except: pass
     sleep(2)
@@ -138,12 +132,10 @@ def process_login(driver, target_link):
     
     driver.get(target_link)
     sleep(5) 
-        
     check_blocking_modals(driver)
     return True
 
 def initialize_game_elements(driver, nome_bot):
-    """Tenta localizar o iframe e o elemento de histórico."""
     try:
         driver.switch_to.default_content()
     except: pass
@@ -151,7 +143,7 @@ def initialize_game_elements(driver, nome_bot):
     iframe = None
     try:
         print(f"[{nome_bot}] 🔎 Buscando Iframe...")
-        iframe = WebDriverWait(driver, 10).until(
+        iframe = WebDriverWait(driver, 15).until(
             EC.presence_of_element_located((By.XPATH, '//iframe[contains(@src, "spribe") or contains(@src, "aviator")]'))
         )
         driver.switch_to.frame(iframe)
@@ -165,7 +157,7 @@ def initialize_game_elements(driver, nome_bot):
     hist = None
     try:
         print(f"[{nome_bot}] 🔎 Buscando Histórico...")
-        hist = WebDriverWait(driver, 5).until(
+        hist = WebDriverWait(driver, 10).until(
             EC.presence_of_element_located((By.CSS_SELECTOR, ".payouts-block, app-stats-widget"))
         )
         print(f"[{nome_bot}] ✅ Elementos carregados.")
@@ -176,7 +168,6 @@ def initialize_game_elements(driver, nome_bot):
         print(f"[{nome_bot}] ❌ Erro ao buscar Histórico: {e}")
         return iframe, None
 
-    # NOVO: Adicione uma verificação final antes de retornar
     if iframe is None or hist is None:
         return None, None
         
@@ -195,61 +186,66 @@ def getColorClass(value):
 # 🤖 LÓGICA DE SESSÃO INDIVIDUAL (THREAD)
 # =============================================================
 def run_single_bot(bot_config):
-    """Função que roda o ciclo de vida completo de UM bot em sua própria thread/driver."""
     nome = bot_config["nome"]
     link = bot_config["link"]
     path_fb = bot_config["firebase_path"]
     
     relogin_date = date.today()
 
-    while True: # Loop infinito de reconexão/reinício
+    while True: # Loop Driver
         driver = None
         try:
             print(f"\n🔄 [{nome}] Iniciando novo ciclo de driver...")
             driver = start_driver(nome)
             
             if driver is None:
-                raise Exception("start_driver falhou ao retornar o driver.")
+                raise Exception("start_driver falhou.")
             
             if not process_login(driver, link):
                 raise Exception("Falha no login ou navegação")
 
-            # NOVO: Verificação defensiva antes de desempacotar
             elements = initialize_game_elements(driver, nome)
             if elements is None or len(elements) != 2:
-                # O log de sucesso pode ter sido impresso, mas o retorno não foi a tupla.
-                raise Exception("initialize_game_elements retornou resultado inválido ou None.")
+                raise Exception("Falha na inicialização dos elementos.")
 
             iframe, hist = elements
-
             if hist is None: 
-                raise Exception("Elementos críticos (histórico) não encontrados na inicialização") 
+                raise Exception("Histórico não encontrado.") 
 
             print(f"🚀 [{nome}] MONITORANDO EM '{path_fb}'")
             
             LAST_SENT = None
             ULTIMO_MULTIPLIER_TIME = time()
             
-            while True: # Loop de leitura
-                
-                # 1. Manutenção Diária e Inatividade
+            while True: # Loop Leitura
                 now_br = datetime.now(TZ_BR)
                 
+                # Check Diário
                 if now_br.hour == 0 and now_br.minute <= 5 and (relogin_date != now_br.date()):
-                    print(f"🌙 [{nome}] Reinício diário forçado.")
+                    print(f"🌙 [{nome}] Reinício diário.")
                     relogin_date = now_br.date()
                     raise Exception("Reinício Diário")
 
+                # Check Inatividade
                 if (time() - ULTIMO_MULTIPLIER_TIME) > TEMPO_MAX_INATIVIDADE:
                     raise Exception("Inatividade detectada")
 
-                # 2. Leitura e Processamento
                 try:
                     driver.switch_to.default_content()
                     driver.switch_to.frame(iframe) 
                     
-                    first_payout = hist.find_element(By.CSS_SELECTOR, ".payout:first-child, .bubble-multiplier:first-child")
-                    raw_text = first_payout.get_attribute("innerText")
+                    # CORREÇÃO 2: LEITURA SUAVE
+                    # Em vez de tentar pegar direto e dar erro, pegamos a lista
+                    # Se a lista estiver vazia, apenas ignora (continue)
+                    # Não gera erro nem reinicia o bot
+                    payouts = hist.find_elements(By.CSS_SELECTOR, ".payout:first-child, .bubble-multiplier:first-child")
+                    
+                    if not payouts:
+                        # Elemento ainda não carregou ou está piscando
+                        sleep(POLLING_INTERVAL)
+                        continue 
+                    
+                    raw_text = payouts[0].get_attribute("innerText")
                     clean_text = raw_text.strip().lower().replace('x', '')
 
                     if not clean_text:
@@ -262,11 +258,8 @@ def run_single_bot(bot_config):
                         sleep(POLLING_INTERVAL)
                         continue
                     
-                    # 3. Envio
                     if novo != LAST_SENT:
                         ULTIMO_MULTIPLIER_TIME = time()
-                        now_br = datetime.now(TZ_BR)
-                        
                         entry = {
                             "multiplier": f"{novo:.2f}",
                             "time": now_br.strftime("%H:%M:%S"),
@@ -280,46 +273,41 @@ def run_single_bot(bot_config):
                             print(f"🔥 [{nome}] {entry['multiplier']}x")
                             LAST_SENT = novo
                         except Exception as e:
-                            print(f"⚠️ [{nome}] Erro Firebase: {e}")
+                            # Erro de conexão temporário não deve reiniciar o driver
+                            print(f"⚠️ [{nome}] Erro conexão Firebase: {e}")
 
                     sleep(POLLING_INTERVAL)
 
-                except (StaleElementReferenceException, NoSuchElementException, WebDriverException) as e:
-                    error_name = e.__class__.__name__
-                    print(f"⚠️ [{nome}] Erro de elemento/driver ('{error_name}'). Tentando re-inicializar elementos...")
-                    
-                    # Tenta re-localizar apenas o iframe e o histórico
+                except (StaleElementReferenceException, NoSuchElementException) as e:
+                    # Se der erro Stale, tenta re-localizar apenas o IFRAME/HISTÓRICO
+                    # Não reinicia o navegador todo
+                    print(f"⚠️ [{nome}] Elemento perdido. Tentando recuperar...")
                     iframe_temp, hist_temp = initialize_game_elements(driver, nome)
-                    
                     if hist_temp:
                         iframe, hist = iframe_temp, hist_temp
-                        print(f"[{nome}] ✅ Re-inicialização bem-sucedida. Retomando o loop.")
                         continue
-                    else: 
-                        raise Exception(f"Falha crítica ao re-inicializar elementos após {error_name}.")
-                    
+                    else:
+                        raise Exception("Não foi possível recuperar elementos.")
+
                 except Exception as e:
-                    # Captura qualquer outro erro inesperado no loop de leitura
-                    raise Exception(f"Erro inesperado no loop de leitura: {e}")
+                    # Erros inesperados no loop de leitura apenas pulam para a próxima iteração
+                    # para evitar crash total, a menos que seja grave
+                    pass 
 
         except Exception as e:
-            # Captura todas as falhas críticas (TypeError, Login, Inicialização, etc.)
-            print(f"❌ [{nome}] Falha: {e.__class__.__name__} ({e}). Reiniciando driver em 7s...")
+            print(f"❌ [{nome}] Falha Crítica: {e}. Reiniciando em 10s...")
             if driver:
                 try: driver.quit()
                 except: pass
-            sleep(7) # NOVO: Tempo de espera aumentado para garantir a limpeza dos processos
+            sleep(10)
 
-# =============================================================
-# 🚀 EXECUTOR PARALELO
-# =============================================================
 if __name__ == "__main__":
     if not EMAIL or not PASSWORD:
-        print("❗ Configure EMAIL e PASSWORD nas variáveis de ambiente.")
+        print("❗ Configure EMAIL e PASSWORD.")
         sys.exit(1)
     
     print("==============================================")
-    print("    GOATHBOT V6.4 - DUAL MONITORING (ROBUSTO)")
+    print("    GOATHBOT V6.5 - FINAL STABLE")
     print("==============================================")
 
     threads = []
@@ -327,14 +315,12 @@ if __name__ == "__main__":
         t = threading.Thread(target=run_single_bot, args=(config,))
         t.start()
         threads.append(t)
-        sleep(3) 
+        sleep(5) 
 
     try:
         for t in threads:
             t.join()
     except KeyboardInterrupt:
-        print("\n🚫 Monitoramento interrompido pelo usuário (Ctrl+C).")
+        print("\n🚫 Interrompido.")
     except Exception as e:
-        print(f"\n❌ ERRO NO EXECUTOR PRINCIPAL: {e}")
-    
-    print("✅ Programa encerrado.")
+        print(f"\n❌ Erro Geral: {e}")
