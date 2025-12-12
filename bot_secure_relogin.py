@@ -132,4 +132,240 @@ def initialize_driver_instance():
     options.add_argument("--disable-dev-shm-usage") # Vital para containers
     options.add_argument("--disable-popup-blocking")
     options.add_argument("--window-size=1280,720") # Resolução menor gasta menos RAM
-    options.add_argument("--disable-gpu") # Desativa GPU (economiza RAM em
+    options.add_argument("--disable-gpu") # Desativa GPU (economiza RAM em headless)
+    options.add_argument("--disable-extensions")
+    options.add_argument("--dns-prefetch-disable")
+    
+    # 2. BLOQUEIO DE IMAGENS, CSS E FONTES (GRANDE ECONOMIA DE RAM)
+    prefs = {
+        "profile.managed_default_content_settings.images": 2,
+        "profile.managed_default_content_settings.stylesheets": 2, 
+        "profile.managed_default_content_settings.fonts": 2,
+        "profile.default_content_setting_values.notifications": 2,
+        "profile.default_content_settings.popups": 0
+    }
+    options.add_experimental_option("prefs", prefs)
+
+    options.add_argument("--log-level=3")
+    options.add_argument("--silent")
+    options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36")
+    
+    try:
+        # Tenta caminho Linux padrão
+        return webdriver.Chrome(service=Service("/usr/bin/chromedriver"), options=options)
+    except:
+        # Fallback (Windows/Local)
+        # return webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
+        return webdriver.Chrome(options=options)
+
+
+def setup_tabs_and_login(driver):
+    print("➡️ Acessando site (Modo Econômico)...")
+    
+    try:
+        driver.get(URL_DO_SITE)
+        sleep(3)
+        verificar_modais_bloqueio(driver)
+
+        btns = driver.find_elements(By.XPATH, "//button[contains(., 'Entrar')] | //a[contains(@href, 'login')]") 
+        if btns: 
+            driver.execute_script("arguments[0].click();", btns[0])
+            sleep(1)
+            
+        driver.find_element(By.NAME, "email").send_keys(EMAIL)
+        driver.find_element(By.NAME, "password").send_keys(PASSWORD)
+        sleep(0.5)
+        driver.find_element(By.CSS_SELECTOR, "button[type='submit']").click()
+        print("✅ Login enviado.")
+        sleep(5) 
+    except Exception as e:
+        print(f"⚠️ Aviso no login: {e}")
+
+    handles = {}
+    
+    # Aba 1
+    config1 = CONFIG_BOTS[0]
+    driver.get(config1["link"])
+    sleep(3) # Reduzi o tempo de espera pois não carrega imagens
+    handles[config1["firebase_path"]] = driver.current_window_handle
+    print(f"✅ Aba {config1['nome']} pronta.")
+
+    # Aba 2
+    config2 = CONFIG_BOTS[1]
+    driver.execute_script("window.open('');")
+    new_handle = [h for h in driver.window_handles if h != driver.current_window_handle][0]
+    driver.switch_to.window(new_handle)
+    driver.get(config2["link"])
+    sleep(3)
+    handles[config2["firebase_path"]] = driver.current_window_handle
+    print(f"✅ Aba {config2['nome']} pronta.")
+    
+    driver.switch_to.window(handles[config1["firebase_path"]]) 
+    return handles
+
+# =============================================================
+# 🎮 BUSCA DE ELEMENTOS
+# =============================================================
+def find_game_elements(driver, game_handle):
+    try:
+        driver.switch_to.window(game_handle)
+        driver.switch_to.default_content()
+        
+        iframe = WebDriverWait(driver, 10).until( 
+            EC.presence_of_element_located((By.XPATH, '//iframe[contains(@src, "spribe") or contains(@src, "aviator")]'))
+        )
+        driver.switch_to.frame(iframe)
+        
+        hist = WebDriverWait(driver, 5).until( 
+            EC.presence_of_element_located((By.CSS_SELECTOR, "app-stats-widget, .payouts-block, .payouts-block__list"))
+        )
+        return iframe, hist
+    except:
+        return None, None
+
+# =============================================================
+# 🔄 THREAD INDIVIDUAL
+# =============================================================
+def start_bot_thread(driver, bot_config: dict, game_handle: str):
+    nome_log = bot_config['nome']
+    firebase_path = bot_config['firebase_path']
+    
+    # Busca inicial
+    iframe, hist_element = find_game_elements(driver, game_handle)
+    
+    LAST_SENT = None
+    ULTIMO_MULTIPLIER_TIME = time()
+    
+    while not STOP_EVENT.is_set():
+        raw_text = None
+        
+        # === SEÇÃO CRÍTICA ===
+        with DRIVER_LOCK:
+            if STOP_EVENT.is_set(): break
+            try:
+                driver.switch_to.window(game_handle)
+                
+                if not iframe or not hist_element:
+                    iframe, hist_element = find_game_elements(driver, game_handle)
+                    if not iframe: raise Exception("Recarregando elementos...")
+
+                try: driver.switch_to.frame(iframe)
+                except: pass
+
+                first_payout = hist_element.find_element(By.CSS_SELECTOR, ".payout:first-child, .bubble-multiplier:first-child")
+                raw_text = first_payout.get_attribute("innerText")
+                
+            except Exception:
+                iframe = None 
+                hist_element = None
+                continue 
+        # === FIM CRÍTICA ===
+        
+        if raw_text:
+            clean_text = raw_text.strip().lower().replace('x', '').replace(',', '.')
+            if clean_text:
+                try:
+                    novo_valor = float(clean_text)
+                    if novo_valor != LAST_SENT:
+                        now_br = datetime.now(TZ_BR)
+                        payload = {
+                            "multiplier": f"{novo_valor:.2f}",
+                            "time": now_br.strftime("%H:%M:%S"),
+                            "color": getColorClass(novo_valor),
+                            "date": now_br.strftime("%Y-%m-%d")
+                        }
+                        enviar_firebase_async(firebase_path, payload, nome_log)
+                        LAST_SENT = novo_valor
+                        ULTIMO_MULTIPLIER_TIME = time()
+                except: pass 
+
+        # Checagem de Inatividade
+        if (time() - ULTIMO_MULTIPLIER_TIME) > TEMPO_MAX_INATIVIDADE:
+            print(f"🚨 {nome_log}: Sem dados há {TEMPO_MAX_INATIVIDADE}s. Reiniciando...")
+            STOP_EVENT.set() 
+            return 
+        
+        sleep(POLLING_INTERVAL)
+
+# =============================================================
+# 🚀 SUPERVISOR (MAIN LOOP)
+# =============================================================
+def rodar_ciclo_monitoramento():
+    DRIVER = None
+    STOP_EVENT.clear() 
+    inicio_ciclo = time()
+    
+    try:
+        print("\n🔵 INICIANDO NOVO CICLO...")
+        DRIVER = initialize_driver_instance()
+        handles = setup_tabs_and_login(DRIVER)
+        
+        threads = []
+        for config in CONFIG_BOTS:
+            path = config["firebase_path"]
+            handle = handles.get(path)
+            if handle:
+                t = threading.Thread(target=start_bot_thread, args=(DRIVER, config, handle))
+                t.start()
+                threads.append(t)
+
+        print("⏳ Monitoramento rodando...")
+        
+        # Loop principal do Supervisor
+        while any(t.is_alive() for t in threads):
+            if STOP_EVENT.is_set():
+                break
+            
+            # REINÍCIO PREVENTIVO (Limpa RAM acumulada)
+            tempo_rodando = time() - inicio_ciclo
+            if tempo_rodando > CICLO_MAXIMO_SEGUNDOS:
+                print(f"♻️ Ciclo de {CICLO_MAXIMO_SEGUNDOS}s atingido. Reiniciando para limpeza de RAM...")
+                STOP_EVENT.set()
+                break
+                
+            sleep(2)
+            
+    except Exception as e:
+        print(f"\n❌ ERRO NO CICLO: {e}")
+        traceback.print_exc()
+    finally:
+        print("🛑 Encerrando ciclo...")
+        STOP_EVENT.set() 
+        
+        # Aguarda threads
+        for t in threads:
+            if t.is_alive(): t.join(timeout=2) 
+
+        # Fecha driver
+        if DRIVER:
+            try:
+                DRIVER.quit()
+                print("🗑️ Driver fechado.")
+            except: pass
+        
+        # 🔥 O PULO DO GATO: LIMPEZA FORÇADA DE RAM
+        DRIVER = None
+        gc.collect() 
+        print("🧹 Memória RAM liberada (GC).")
+        sleep(3) 
+
+if __name__ == "__main__":
+    if not EMAIL or not PASSWORD:
+        print("❗ Configure EMAIL e PASSWORD.")
+        sys.exit()
+    
+    print("==============================================")
+    print("   GOATHBOT V6.2 - OTIMIZADO (RAM SAVER)      ")
+    print("==============================================")
+
+    while True:
+        try:
+            rodar_ciclo_monitoramento()
+            print("💤 Aguardando 5s para novo ciclo...\n")
+            sleep(5)
+        except KeyboardInterrupt:
+            print("\n🚫 Parada manual.")
+            break
+        except Exception as e:
+            print(f"❌ Erro crítico Supervisor: {e}")
+            sleep(10)
