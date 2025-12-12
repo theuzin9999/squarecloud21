@@ -53,9 +53,8 @@ PASSWORD = os.getenv("PASSWORD")
 TZ_BR = pytz.timezone("America/Sao_Paulo")
 
 # Configurações Turbo
-POLLING_INTERVAL = 0.5  # Aumentado para reduzir CPU/RAM (menos polls por segundo)
+POLLING_INTERVAL = 0.1          # MANTIDO o valor de 100ms
 TEMPO_MAX_INATIVIDADE = 360     # 6 minutos
-TEMPO_MAX_CICLO = 1800  # Novo: Forçar reinício a cada 30 min para liberar RAM acumulada
 
 # =============================================================
 # 🔧 FIREBASE
@@ -88,7 +87,7 @@ def enviar_firebase_async(path, data, nome_jogo):
             print(f"🔥 [{nome_jogo.upper()}] {data['multiplier']}x às {data['time']}")
         except Exception:
             pass 
-    threading.Thread(target=_send, daemon=True).start()  # Daemon para não bloquear shutdown
+    threading.Thread(target=_send).start()
 
 def verificar_modais_bloqueio(driver):
     """Fecha popups chatos"""
@@ -108,22 +107,23 @@ def verificar_modais_bloqueio(driver):
         except: pass
 
 # =============================================================
-# 🛠️ DRIVER E NAVEGAÇÃO
+# 🛠️ DRIVER E NAVEGAÇÃO - OTIMIZAÇÕES DE MEMÓRIA AQUI
 # =============================================================
-def kill_chrome_processes():
-    """Matar processos Chrome para liberar RAM em Windows e Linux"""
+def kill_driver_processes():
+    """Tenta matar processos do Chrome/ChromeDriver para liberar memória (Windows/Linux)."""
     try:
-        if os.name == 'nt':  # Windows
+        if os.name == 'nt': # Windows
             subprocess.run("taskkill /f /im chromedriver.exe", shell=True, stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
             subprocess.run("taskkill /f /im chrome.exe", shell=True, stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
-        else:  # Linux/Unix (Square Cloud provavelmente usa Linux)
-            subprocess.run("pkill -f chromedriver", shell=True, stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
-            subprocess.run("pkill -f chrome", shell=True, stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
-        print("🗑️ Processos Chrome/Driver antigos eliminados.")
-    except: pass
+        elif os.name == 'posix': # Linux/MacOS (padrão em VPS)
+            subprocess.run("pkill -f 'chromedriver|chrome'", shell=True, stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
+        print("🧹 Tentativa de limpeza de processos concluída.")
+    except: 
+        pass
 
 def initialize_driver_instance():
-    kill_chrome_processes()  # Chamar antes de iniciar novo driver
+    # Tenta matar processos antigos para liberar memória
+    kill_driver_processes() 
 
     options = webdriver.ChromeOptions()
     options.page_load_strategy = 'eager'
@@ -131,22 +131,26 @@ def initialize_driver_instance():
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-popup-blocking")
-    options.add_argument("--window-size=1280,720")  # Reduzir resolução para menos RAM
+    options.add_argument("--window-size=1920,1080")
     options.add_argument("--log-level=3")
     options.add_argument("--silent")
     options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36")
-    options.add_argument("--disable-gpu")  # Desabilitar GPU para menos RAM em headless
-    options.add_argument("--disable-software-rasterizer")  # Otimização
-    options.add_argument("--blink-settings=imagesEnabled=false")  # Desabilitar imagens para reduzir carga (se possível no jogo)
-    options.add_experimental_option("excludeSwitches", ["enable-automation"])  # Menos overhead
+    
+    # 💡 NOVAS OPÇÕES PARA REDUZIR CONSUMO DE MEMÓRIA (RAM)
+    options.add_argument('--disable-gpu')
+    options.add_argument('--disable-browser-side-navigation')
+    options.add_argument('--disable-software-rasterizer')
+    options.add_argument('--disable-features=NetworkService,NetworkServiceInProcess')
+    options.add_argument('--disk-cache-size=0') # Desativa cache em disco
     
     try:
-        # Fallback para servidores Linux (Render/Heroku/VPS/Square Cloud)
+        # Fallback para servidores Linux (Render/Heroku/VPS)
         return webdriver.Chrome(service=Service("/usr/bin/chromedriver"), options=options)
     except:
-        # Padrão com WDM (se disponível)
-        service = Service(ChromeDriverManager().install())
-        return webdriver.Chrome(service=service, options=options)
+        # Padrão
+        # service = Service(ChromeDriverManager().install()) # Remover se estiver usando VPS sem WDM
+        return webdriver.Chrome(options=options)
+
 
 def setup_tabs_and_login(driver):
     """Faz o login e configura as duas abas do navegador."""
@@ -185,6 +189,7 @@ def setup_tabs_and_login(driver):
     print(f"✅ Aba {config1['nome']} configurada.")
 
     # Aba 2 (Segundo item da CONFIG_BOTS)
+    config2 = CONFIG_BOTS[1]
     driver.execute_script("window.open('');")
     new_handle = [h for h in driver.window_handles if h != driver.current_window_handle][0]
     
@@ -236,7 +241,6 @@ def start_bot_thread(driver, bot_config: dict, game_handle: str):
 
     LAST_SENT = None
     ULTIMO_MULTIPLIER_TIME = time()
-    CICLO_START_TIME = time()  # Novo: Tempo de início do ciclo para forçar reinício
     
     while not STOP_EVENT.is_set():
         raw_text = None
@@ -300,38 +304,33 @@ def start_bot_thread(driver, bot_config: dict, game_handle: str):
         
         # 2. Reinício Diário (00:00)
         now_br = datetime.now(TZ_BR)
+        # Permite reinício entre 00:00 e 00:05
         if now_br.hour == 0 and now_br.minute <= 5: 
             print(f"⏰ {nome_log}: REINÍCIO DIÁRIO DETECTADO. SOLICITANDO REINÍCIO GERAL...")
-            STOP_EVENT.set()
-            return
-
-        # 3. Novo: Forçar reinício a cada 30 min para liberar RAM
-        if (time() - CICLO_START_TIME) > TEMPO_MAX_CICLO:
-            print(f"🕒 {nome_log}: TEMPO MÁXIMO DE CICLO ATINGIDO ({TEMPO_MAX_CICLO}s). SOLICITANDO REINÍCIO PARA LIBERAR RAM...")
             STOP_EVENT.set()
             return
             
         sleep(POLLING_INTERVAL)
 
 # =============================================================
-# 🚀 SUPERVISOR (MAIN LOOP)
+# 🚀 SUPERVISOR (MAIN LOOP) - OTIMIZAÇÕES DE CLEANUP AQUI
 # =============================================================
 def rodar_ciclo_monitoramento():
     """Função que configura e roda um ciclo completo com threads até que precise reiniciar"""
     DRIVER = None
     STOP_EVENT.clear() 
+    threads = [] # Inicializa a lista aqui para garantir que existe no finally
     
     try:
         print("\n🔵 INICIANDO NOVO CICLO DO NAVEGADOR...")
         DRIVER = initialize_driver_instance()
         handles = setup_tabs_and_login(DRIVER)
         
-        threads = []
         for config in CONFIG_BOTS:
             path = config["firebase_path"]
             handle = handles.get(path)
             if handle:
-                t = threading.Thread(target=start_bot_thread, args=(DRIVER, config, handle), daemon=True)  # Daemon para shutdown rápido
+                t = threading.Thread(target=start_bot_thread, args=(DRIVER, config, handle))
                 t.start()
                 threads.append(t)
             else:
@@ -354,14 +353,21 @@ def rodar_ciclo_monitoramento():
         # Garante que as threads parem e o driver feche
         STOP_EVENT.set() 
         for t in threads:
-            if t.is_alive(): t.join(timeout=2) 
+            # Aumentado timeout de join para 5s para dar tempo às threads finalizarem
+            if t.is_alive(): t.join(timeout=5) 
 
         if DRIVER:
             try:
-                DRIVER.quit()
+                # O 'quit()' é crucial para fechar o processo do ChromeDriver
+                DRIVER.quit() 
                 print("🗑️ Driver encerrado com sucesso.")
-            except: pass
-        kill_chrome_processes()  # Limpeza extra após quit
+            except: 
+                print("⚠️ Aviso: Falha ao encerrar DRIVER. Tentando forçar limpeza...")
+                pass
+        
+        # 🧹 Limpeza agressiva final para matar processos zumbis
+        kill_driver_processes() 
+        
         sleep(5) 
 
 if __name__ == "__main__":
@@ -383,4 +389,5 @@ if __name__ == "__main__":
             break
         except Exception as e:
             print(f"❌ Erro crítico no Supervisor: {e}")
+            # Em caso de erro crítico no loop principal, espere mais antes de tentar de novo
             sleep(10)
