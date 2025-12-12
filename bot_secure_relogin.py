@@ -17,11 +17,9 @@ import sys
 import subprocess 
 
 # =============================================================
-# 🔥 GOATHBOT V6.5 - DUAL MONITORING (CORREÇÃO CRÍTICA)
+# 🔥 GOATHBOT V6.6 - DUAL MONITORING (LEITURA DIRETA)
 # =============================================================
 SERVICE_ACCOUNT_FILE = 'serviceAccountKey.json'
-
-# CORREÇÃO 1: URL DO FIREBASE CORRIGIDA (.com)
 DATABASE_URL = 'https://history-dashboard-a70ee-default-rtdb.firebaseio.com'
 URL_DO_SITE = "https://www.goathbet.com"
 
@@ -47,7 +45,7 @@ EMAIL = os.getenv("EMAIL")
 PASSWORD = os.getenv("PASSWORD")
 TZ_BR = pytz.timezone("America/Sao_Paulo")
 
-POLLING_INTERVAL = 0.1 # Aumentei levemente para dar tempo do elemento renderizar
+POLLING_INTERVAL = 0.1 
 TEMPO_MAX_INATIVIDADE = 360      
 
 # =============================================================
@@ -149,29 +147,14 @@ def initialize_game_elements(driver, nome_bot):
         driver.switch_to.frame(iframe)
     except TimeoutException:
         print(f"[{nome_bot}] ❌ Timeout: Iframe não encontrado.")
-        return None, None 
+        return None 
     except Exception as e:
         print(f"[{nome_bot}] ❌ Erro ao focar Iframe: {e}")
-        return None, None
+        return None
 
-    hist = None
-    try:
-        print(f"[{nome_bot}] 🔎 Buscando Histórico...")
-        hist = WebDriverWait(driver, 10).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, ".payouts-block, app-stats-widget"))
-        )
-        print(f"[{nome_bot}] ✅ Elementos carregados.")
-    except TimeoutException:
-        print(f"[{nome_bot}] ❌ Timeout: Elemento de Histórico não encontrado.")
-        return iframe, None 
-    except Exception as e:
-        print(f"[{nome_bot}] ❌ Erro ao buscar Histórico: {e}")
-        return iframe, None
-
-    if iframe is None or hist is None:
-        return None, None
-        
-    return iframe, hist
+    # Diferente do anterior, não precisamos retornar o 'hist' fixo, 
+    # pois vamos buscá-lo dinamicamente para evitar StaleElement
+    return iframe
 
 def getColorClass(value):
     try:
@@ -204,18 +187,18 @@ def run_single_bot(bot_config):
             if not process_login(driver, link):
                 raise Exception("Falha no login ou navegação")
 
-            elements = initialize_game_elements(driver, nome)
-            if elements is None or len(elements) != 2:
-                raise Exception("Falha na inicialização dos elementos.")
-
-            iframe, hist = elements
-            if hist is None: 
-                raise Exception("Histórico não encontrado.") 
+            # Inicializa apenas o iframe
+            iframe = initialize_game_elements(driver, nome)
+            if iframe is None:
+                raise Exception("Falha na inicialização do Iframe.")
 
             print(f"🚀 [{nome}] MONITORANDO EM '{path_fb}'")
             
             LAST_SENT = None
             ULTIMO_MULTIPLIER_TIME = time()
+            
+            # Seletor global robusto (pega tanto Aviator 1 quanto 2)
+            SELECTOR_MULTIPLIER = "app-stats-widget .bubble-multiplier, .payouts-block .payout, .bubble-multiplier, .payout"
             
             while True: # Loop Leitura
                 now_br = datetime.now(TZ_BR)
@@ -231,20 +214,19 @@ def run_single_bot(bot_config):
                     raise Exception("Inatividade detectada")
 
                 try:
+                    # Garante foco no iframe
                     driver.switch_to.default_content()
                     driver.switch_to.frame(iframe) 
                     
-                    # CORREÇÃO 2: LEITURA SUAVE
-                    # Em vez de tentar pegar direto e dar erro, pegamos a lista
-                    # Se a lista estiver vazia, apenas ignora (continue)
-                    # Não gera erro nem reinicia o bot
-                    payouts = hist.find_elements(By.CSS_SELECTOR, ".payout:first-child, .bubble-multiplier:first-child")
+                    # BUSCA DIRETA (Evita StaleElement do pai)
+                    payouts = driver.find_elements(By.CSS_SELECTOR, SELECTOR_MULTIPLIER)
                     
                     if not payouts:
-                        # Elemento ainda não carregou ou está piscando
+                        # Se não achou nada, espera um pouco
                         sleep(POLLING_INTERVAL)
                         continue 
                     
+                    # Pega o primeiro (geralmente o mais recente)
                     raw_text = payouts[0].get_attribute("innerText")
                     clean_text = raw_text.strip().lower().replace('x', '')
 
@@ -273,25 +255,21 @@ def run_single_bot(bot_config):
                             print(f"🔥 [{nome}] {entry['multiplier']}x")
                             LAST_SENT = novo
                         except Exception as e:
-                            # Erro de conexão temporário não deve reiniciar o driver
-                            print(f"⚠️ [{nome}] Erro conexão Firebase: {e}")
+                            pass # Ignora erro temporário de net
 
                     sleep(POLLING_INTERVAL)
 
                 except (StaleElementReferenceException, NoSuchElementException) as e:
-                    # Se der erro Stale, tenta re-localizar apenas o IFRAME/HISTÓRICO
-                    # Não reinicia o navegador todo
-                    print(f"⚠️ [{nome}] Elemento perdido. Tentando recuperar...")
-                    iframe_temp, hist_temp = initialize_game_elements(driver, nome)
-                    if hist_temp:
-                        iframe, hist = iframe_temp, hist_temp
+                    # Se o iframe morrer, tenta achar de novo
+                    print(f"⚠️ [{nome}] Iframe perdido. Recuperando...")
+                    iframe_new = initialize_game_elements(driver, nome)
+                    if iframe_new:
+                        iframe = iframe_new
                         continue
                     else:
-                        raise Exception("Não foi possível recuperar elementos.")
+                        raise Exception("Iframe irrecuperável.")
 
                 except Exception as e:
-                    # Erros inesperados no loop de leitura apenas pulam para a próxima iteração
-                    # para evitar crash total, a menos que seja grave
                     pass 
 
         except Exception as e:
@@ -307,7 +285,7 @@ if __name__ == "__main__":
         sys.exit(1)
     
     print("==============================================")
-    print("    GOATHBOT V6.5 - FINAL STABLE")
+    print("    GOATHBOT V6.6 - DUAL MONITORING (DIRECT)")
     print("==============================================")
 
     threads = []
