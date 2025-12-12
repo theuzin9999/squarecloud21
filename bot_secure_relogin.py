@@ -3,7 +3,7 @@ from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
-from webdriver_manager.chrome import ChromeDriverManager
+# ⚠️ REMOVIDO: from webdriver_manager.chrome import ChromeDriverManager
 from time import sleep, time
 from datetime import datetime
 from selenium.common.exceptions import StaleElementReferenceException, TimeoutException, NoSuchElementException
@@ -107,7 +107,7 @@ def verificar_modais_bloqueio(driver):
         except: pass
 
 # =============================================================
-# 🛠️ DRIVER E NAVEGAÇÃO - OTIMIZAÇÕES DE MEMÓRIA AQUI
+# 🛠️ DRIVER E NAVEGAÇÃO - MAIS OTIMIZAÇÕES AGRESSIVAS
 # =============================================================
 def kill_driver_processes():
     """Tenta matar processos do Chrome/ChromeDriver para liberar memória (Windows/Linux)."""
@@ -116,7 +116,6 @@ def kill_driver_processes():
             subprocess.run("taskkill /f /im chromedriver.exe", shell=True, stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
             subprocess.run("taskkill /f /im chrome.exe", shell=True, stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
         elif os.name == 'posix': # Linux/MacOS (padrão em VPS/Containers)
-            # Sinal 9 (SIGKILL) é mais agressivo para garantir a morte do processo.
             subprocess.run("pkill -9 -f 'chromedriver|chrome'", shell=True, stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
         print("🧹 Tentativa de limpeza de processos concluída.")
     except: 
@@ -131,9 +130,11 @@ def initialize_driver_instance():
     
     # === CRÍTICO PARA AMBIENTES HEADLESS (Corrige SessionNotCreatedException) ===
     options.add_argument("--headless=new") 
-    options.add_argument("--no-sandbox") # Essencial para rodar em containers Linux/Square Cloud
-    options.add_argument("--disable-dev-shm-usage") # Evita problemas de memória/renderização em containers
-    options.add_argument("--remote-debugging-port=9222") # Ajuda a estabilizar a conexão com o renderizador
+    options.add_argument("--no-sandbox") 
+    options.add_argument("--disable-dev-shm-usage") 
+    options.add_argument("--remote-debugging-port=9222") 
+    # 💥 NOVO: Tenta forçar o Chrome a rodar em um único processo
+    options.add_argument("--single-process") 
     # === FIM CRÍTICO ===
     
     options.add_argument("--disable-popup-blocking")
@@ -147,17 +148,19 @@ def initialize_driver_instance():
     options.add_argument('--disable-browser-side-navigation')
     options.add_argument('--disable-software-rasterizer')
     options.add_argument('--disable-features=NetworkService,NetworkServiceInProcess')
-    options.add_argument('--disk-cache-size=0') # Desativa cache em disco
+    options.add_argument('--disk-cache-size=0') 
     
     try:
-        # Padrão: O Selenium tenta achar o ChromeDriver no PATH (padrão em containers)
+        # Simplifica para uma única tentativa, confiando que o ChromeDriver está no PATH.
+        # As flags agressivas devem corrigir a falha de inicialização do Chrome.
         return webdriver.Chrome(options=options)
     except Exception as e:
-        # Se falhar no padrão, tenta o caminho explícito do Linux/VPS (fallback)
+        print(f"❌ ERRO CRÍTICO NA INICIALIZAÇÃO DO DRIVER. Erro: {e}")
+        # Tenta o caminho explícito do Linux/VPS como ÚLTIMO recurso
         try:
              return webdriver.Chrome(service=Service("/usr/bin/chromedriver"), options=options)
         except Exception as fallback_e:
-            print(f"❌ ERRO CRÍTICO NA INICIALIZAÇÃO DO DRIVER. Verifique se o ChromeDriver está instalado e no PATH. Erro: {fallback_e}")
+            print(f"❌ FALHA DE FALLBACK: Não foi possível iniciar o driver. Erro: {fallback_e}")
             raise # Re-lança para que o supervisor tente reiniciar
 
 
@@ -362,12 +365,10 @@ def rodar_ciclo_monitoramento():
         # Garante que as threads parem
         STOP_EVENT.set() 
         for t in threads:
-            # Aumentado timeout de join para 5s para dar tempo às threads finalizarem
             if t.is_alive(): t.join(timeout=5) 
 
         if DRIVER:
             try:
-                # O 'quit()' é crucial para fechar o processo do ChromeDriver
                 DRIVER.quit() 
                 print("🗑️ Driver encerrado com sucesso.")
             except: 
@@ -398,5 +399,4 @@ if __name__ == "__main__":
             break
         except Exception as e:
             print(f"❌ Erro crítico no Supervisor: {e}")
-            # Em caso de erro crítico no loop principal, espere mais antes de tentar de novo
             sleep(10)
