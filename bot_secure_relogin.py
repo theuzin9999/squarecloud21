@@ -3,7 +3,6 @@ from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
-# REMOVIDO: from webdriver_manager.chrome import ChromeDriverManager (Não vamos usar para evitar conflito de versão)
 from time import sleep, time
 from datetime import datetime, date
 from selenium.common.exceptions import StaleElementReferenceException, TimeoutException, WebDriverException, NoSuchElementException
@@ -18,7 +17,7 @@ import subprocess
 import gc 
 
 # =============================================================
-# 🔥 GOATHBOT V7.5 - CORREÇÃO DE DRIVER SQUARE CLOUD
+# 🔥 GOATHBOT V7.6 - 24H & CORREÇÃO DE LOOP
 # =============================================================
 SERVICE_ACCOUNT_FILE = 'serviceAccountKey.json'
 DATABASE_URL = 'https://history-dashboard-a70ee-default-rtdb.firebaseio.com'
@@ -37,18 +36,19 @@ CONFIG_BOTS = [
     }
 ]
 
-# Configuração de Logs
+# Logs apenas de erros críticos
 logging.basicConfig(level=logging.ERROR)
 
 EMAIL = os.getenv("EMAIL")
 PASSWORD = os.getenv("PASSWORD")
 TZ_BR = pytz.timezone("America/Sao_Paulo")
 
-# AJUSTES DE PERFORMANCE
-POLLING_INTERVAL = 0.5
-TEMPO_MAX_INATIVIDADE = 360
-MAX_EMPTY_PAYOUTS_COUNT = 60
-TEMPO_VIDA_DRIVER = 2700 
+# =============================================================
+# ⚙️ CONFIGURAÇÕES DE TEMPO
+# =============================================================
+POLLING_INTERVAL = 0.5        # Velocidade de leitura
+TEMPO_MAX_INATIVIDADE = 360   # 6 minutos sem dados = Reinicia
+MAX_CONSECUTIVE_ERRORS = 50   # Tolerância para erros de leitura antes de reiniciar
 
 # =============================================================
 # 🔧 FIREBASE
@@ -63,16 +63,12 @@ except Exception as e:
     sys.exit(1)
 
 # =============================================================
-# 🛠️ DRIVER E NAVEGAÇÃO (CORRIGIDO PARA SQUARE CLOUD)
+# 🛠️ DRIVER E NAVEGAÇÃO
 # =============================================================
 def start_driver(nome_bot):
-    """Inicia o driver apontando para o binário do sistema."""
     options = webdriver.ChromeOptions()
     
-    # ---------------------------------------------------------
-    # 🔴 CONFIGURAÇÃO CRÍTICA PARA SQUARE CLOUD / LINUX
-    # ---------------------------------------------------------
-    # Aponta explicitamente para o Chromium instalado no container
+    # Configuração específica para Square Cloud / Linux
     options.binary_location = "/usr/bin/chromium"
     
     options.add_argument("--headless=new")
@@ -88,17 +84,14 @@ def start_driver(nome_bot):
     options.add_argument("user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 
     try:
-        # Tenta usar o Selenium Manager nativo (sem ChromeDriverManager)
-        # O Selenium 4.10+ detecta automaticamente o driver compatível com o binary_location
         return webdriver.Chrome(options=options)
     except Exception as e:
-        print(f"❌ [{nome_bot}] Erro driver (Tentativa 1): {e}")
-        # Fallback de segurança caso o path padrão falhe (tenta sem binary_location)
+        print(f"❌ [{nome_bot}] Erro driver: {e}")
         try:
-            options.binary_location = "" # Reseta path
+            # Fallback sem binary location se falhar
+            options.binary_location = ""
             return webdriver.Chrome(options=options)
-        except Exception as e2:
-            print(f"❌ [{nome_bot}] FALHA TOTAL DRIVER: {e2}")
+        except:
             return None
 
 def safe_click(driver, by, value, timeout=5):
@@ -138,7 +131,7 @@ def process_login(driver, target_link):
             if safe_click(driver, By.CSS_SELECTOR, "button[type='submit']", 5):
                 sleep(3)
         except: 
-            print("⚠️ Erro ou já logado.")
+            pass # Assume que pode já estar logado
     
     driver.get(target_link)
     sleep(5) 
@@ -151,7 +144,8 @@ def initialize_game_elements(driver, nome_bot):
     
     try:
         print(f"[{nome_bot}] 🔎 Buscando Iframe...")
-        iframe = WebDriverWait(driver, 20).until(
+        # Aumentei o timeout para 30s para garantir
+        iframe = WebDriverWait(driver, 30).until(
             EC.presence_of_element_located((By.XPATH, '//iframe[contains(@src, "spribe") or contains(@src, "aviator") or contains(@src, "game-client")]'))
         )
         return iframe
@@ -181,8 +175,7 @@ def run_single_bot(bot_config):
     
     while True: # Ciclo de Reinicialização do Driver
         driver = None
-        start_time_driver = time()
-
+        
         try:
             print(f"\n🔄 [{nome}] Iniciando novo ciclo de driver...")
             driver = start_driver(nome)
@@ -192,35 +185,44 @@ def run_single_bot(bot_config):
                 continue
             
             if not process_login(driver, link):
-                raise Exception("Falha no login ou navegação")
+                print(f"⚠️ [{nome}] Falha no login, tentando continuar...")
 
             iframe = initialize_game_elements(driver, nome)
             if iframe is None:
                 raise Exception("Falha na inicialização do Iframe.")
             
+            # Espera carregar o jogo visualmente
             try:
                 driver.switch_to.default_content()
                 driver.switch_to.frame(iframe) 
-                WebDriverWait(driver, 10).until(
-                    EC.presence_of_element_located((By.CSS_SELECTOR, ".payouts-block, app-stats-widget, .history-container"))
+                WebDriverWait(driver, 15).until(
+                    EC.presence_of_element_located((By.CSS_SELECTOR, ".payouts-block, app-stats-widget, .history-container, .payout"))
                 )
-                print(f"[{nome}] ✅ Jogo carregado e pronto.")
+                print(f"[{nome}] ✅ Jogo sincronizado. Monitorando...")
             except:
-                raise Exception("Timeout esperando elementos do jogo.")
+                print(f"⚠️ [{nome}] Aviso: Elementos demoraram, mas tentando ler mesmo assim.")
 
             LAST_SENT = None
             ULTIMO_MULTIPLIER_TIME = time()
-            CONSECUTIVE_EMPTY_PAYOUTS = 0
+            erros_consecutivos = 0
+            
             SELECTOR_MULTIPLIER = ".payouts-block .payout, .payout.ng-star-inserted, app-stats-widget .bubble-multiplier"
 
+            # ==========================================
+            # LOOP DE LEITURA (SEM TEMPO LIMITE DE VIDA)
+            # ==========================================
             while True: 
-                uptime = time() - start_time_driver
-                if uptime > TEMPO_VIDA_DRIVER:
-                    print(f"♻️ [{nome}] Reinício preventivo de memória ({uptime/60:.0f} min).")
-                    break 
+                now = datetime.now(TZ_BR)
 
-                if (time() - ULTIMO_MULTIPLIER_TIME) > TEMPO_MAX_INATIVIDADE:
-                    raise Exception("Inatividade detectada no jogo.")
+                # 1. Reinício Total Diário às 23:59
+                if now.hour == 23 and now.minute == 59:
+                    print(f"🌙 [{nome}] Reinício Diário Programado (23:59).")
+                    raise Exception("Reinício Diário")
+
+                # 2. Checagem de Inatividade (6 minutos)
+                tempo_sem_dados = time() - ULTIMO_MULTIPLIER_TIME
+                if tempo_sem_dados > TEMPO_MAX_INATIVIDADE:
+                    raise Exception(f"Inatividade detectada ({tempo_sem_dados:.0f}s sem dados).")
 
                 try:
                     driver.switch_to.default_content()
@@ -229,17 +231,23 @@ def run_single_bot(bot_config):
                     payouts = driver.find_elements(By.CSS_SELECTOR, SELECTOR_MULTIPLIER)
                     
                     if not payouts:
-                        CONSECUTIVE_EMPTY_PAYOUTS += 1
-                        if CONSECUTIVE_EMPTY_PAYOUTS > MAX_EMPTY_PAYOUTS_COUNT:
-                             raise Exception("Falha ao ler histórico por tempo excessivo.")
+                        # Se não achou, conta erro mas não reinicia imediatamente
+                        erros_consecutivos += 1
+                        if erros_consecutivos > MAX_CONSECUTIVE_ERRORS:
+                             print(f"⚠️ [{nome}] Falha de leitura prolongada.")
+                             # Tenta buscar iframe de novo antes de reiniciar tudo
+                             iframe = initialize_game_elements(driver, nome)
+                             erros_consecutivos = 0 # Reseta se achar iframe
                         sleep(POLLING_INTERVAL)
                         continue 
                     
-                    CONSECUTIVE_EMPTY_PAYOUTS = 0
+                    # Se achou, zera erros
+                    erros_consecutivos = 0
                     
                     raw_text = payouts[0].get_attribute("innerText")
                     clean_text = raw_text.strip().lower().replace('x', '')
 
+                    # Tenta atributo alternativo
                     if not clean_text:
                         clean_text = payouts[0].get_attribute("data-value")
 
@@ -250,16 +258,15 @@ def run_single_bot(bot_config):
                         continue
                     
                     if novo != LAST_SENT:
-                        now_br = datetime.now(TZ_BR)
                         ULTIMO_MULTIPLIER_TIME = time()
                         
                         entry = {
                             "multiplier": f"{novo:.2f}",
-                            "time": now_br.strftime("%H:%M:%S"),
+                            "time": now.strftime("%H:%M:%S"),
                             "color": getColorClass(novo),
-                            "date": now_br.strftime("%Y-%m-%d")
+                            "date": now.strftime("%Y-%m-%d")
                         }
-                        key = now_br.strftime("%Y-%m-%d_%H-%M-%S-%f").replace('.', '-')
+                        key = now.strftime("%Y-%m-%d_%H-%M-%S-%f").replace('.', '-')
                         
                         try:
                             db.reference(f"{path_fb}/{key}").set(entry)
@@ -270,21 +277,23 @@ def run_single_bot(bot_config):
                     sleep(POLLING_INTERVAL)
 
                 except (StaleElementReferenceException, NoSuchElementException):
+                    # Elemento ficou velho? Tenta pegar o iframe de novo sem reiniciar o driver
                     iframe = initialize_game_elements(driver, nome)
-                    if not iframe: break 
-                except Exception:
-                    break 
+                except Exception as e:
+                    # Erro genérico na leitura: APENAS PRINTA, NÃO REINICIA O DRIVER
+                    # Isso evita o loop de reinicialização por erros bobos
+                    # print(f"⚠️ [{nome}] Erro leitura: {e}") 
+                    sleep(1)
+                    continue
 
         except Exception as e:
-            print(f"❌ [{nome}] Erro: {e}. Reiniciando em 5s...")
-        
-        finally:
+            print(f"❌ [{nome}] Reiniciando Driver: {e}")
             if driver:
                 try: driver.quit()
                 except: pass
             driver = None
-            gc.collect() 
-            sleep(5)
+            gc.collect()
+            sleep(10)
 
 if __name__ == "__main__":
     if not EMAIL or not PASSWORD:
@@ -292,7 +301,7 @@ if __name__ == "__main__":
         sys.exit(1)
     
     print("==============================================")
-    print(f"    GOATHBOT V7.5 - FIX SQUARE CLOUD")
+    print(f"    GOATHBOT V7.6 - 24H FIXED")
     print("==============================================")
 
     threads = []
@@ -300,7 +309,7 @@ if __name__ == "__main__":
         t = threading.Thread(target=run_single_bot, args=(config,))
         t.start()
         threads.append(t)
-        sleep(15) # Aumentei o delay para garantir que o Chrome 1 suba completamente antes do 2
+        sleep(15) 
 
     try:
         for t in threads:
