@@ -28,7 +28,7 @@ STOP_EVENT = threading.Event()
 firebase_queue = Queue(maxsize=1000)
 
 # =============================================================
-# 🔥 GOATHBOT V6.3 - ESTÁVEL, LEVE E SINGLE PROCESS
+# 🔥 GOATHBOT V6.4 - ESTABILIDADE DE CONEXÃO E RAM MÍNIMA
 # =============================================================
 SERVICE_ACCOUNT_FILE = 'serviceAccountKey.json'
 DATABASE_URL = 'https://history-dashboard-a70ee-default-rtdb.firebaseio.com'
@@ -120,7 +120,7 @@ def verificar_modais_bloqueio(driver):
         except: pass
 
 # =============================================================
-# 🛠️ DRIVER E NAVEGAÇÃO (ULTRA-OTIMIZADO - FORÇA SINGLE PROCESS)
+# 🛠️ DRIVER E NAVEGAÇÃO (ULTRA-OTIMIZADO - ESTABILIDADE DE CONEXÃO)
 # =============================================================
 def initialize_driver_instance():
     try:
@@ -130,15 +130,12 @@ def initialize_driver_instance():
     except: pass
 
     options = webdriver.ChromeOptions()
-    options.page_load_strategy = 'eager'
     
     # Opções que devem permanecer
     options.add_argument("--headless=new") 
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-popup-blocking")
     options.add_argument("--window-size=1920,1080")
-    options.add_argument("--log-level=3")
-    options.add_argument("--silent")
     
     # OTIMIZAÇÕES AGRESSIVAS DE MEMÓRIA E ESTABILIDADE
     options.add_argument("--disable-gpu")
@@ -148,22 +145,24 @@ def initialize_driver_instance():
     options.add_argument("--blink-settings=imagesEnabled=false") # Desativa Imagens
     options.add_argument("--disable-features=IsolateOrigins,site-per-process") 
     options.add_argument("--disable-logging") 
-    
-    # FIX CRÍTICO: DESABILITAR DEV-SHM-USAGE
     options.add_argument("--disable-dev-shm-usage") 
-
-    # FIX FINAL: FORÇA UM ÚNICO PROCESSO PARA MAXIMIZAR ESTABILIDADE
-    options.add_argument("--single-process") 
+    options.add_argument("--single-process") # Força um único processo (CRÍTICO)
     
     options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit=537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36")
     
+    driver = None
     try:
         # Tenta usar o driver pré-instalado (caminho comum em Square Cloud)
-        return webdriver.Chrome(service=Service("/usr/bin/chromedriver"), options=options)
+        driver = webdriver.Chrome(service=Service("/usr/bin/chromedriver"), options=options)
     except Exception as e:
         print(f"⚠️ Aviso: Falha ao usar o driver em '/usr/bin/chromedriver'. Tentando fallback. Erro: {e}")
-        # Fallback para o driver padrão ou instalado localmente
-        return webdriver.Chrome(options=options)
+        # Fallback 
+        driver = webdriver.Chrome(options=options)
+
+    # Adiciona um timeout de carregamento de página (CRÍTICO)
+    driver.set_page_load_timeout(30) # 30 segundos
+    
+    return driver
 
 
 def setup_tabs_and_login(driver):
@@ -364,7 +363,7 @@ if __name__ == "__main__":
         sys.exit()
     
     print("==============================================")
-    print("      GOATHBOT V6.3 - SUPERVISOR INICIADO     ")
+    print("      GOATHBOT V6.4 - SUPERVISOR INICIADO     ")
     print("==============================================")
 
     threading.Thread(target=firebase_worker, daemon=True).start()
