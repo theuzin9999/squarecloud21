@@ -3,7 +3,7 @@ from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
-# ⚠️ REMOVIDO: from webdriver_manager.chrome import ChromeDriverManager
+# REMOVIDO: from webdriver_manager.chrome import ChromeDriverManager
 from time import sleep, time
 from datetime import datetime
 from selenium.common.exceptions import StaleElementReferenceException, TimeoutException, NoSuchElementException
@@ -116,6 +116,7 @@ def kill_driver_processes():
             subprocess.run("taskkill /f /im chromedriver.exe", shell=True, stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
             subprocess.run("taskkill /f /im chrome.exe", shell=True, stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
         elif os.name == 'posix': # Linux/MacOS (padrão em VPS/Containers)
+            # Reforçado com -9 para SIGKILL
             subprocess.run("pkill -9 -f 'chromedriver|chrome'", shell=True, stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
         print("🧹 Tentativa de limpeza de processos concluída.")
     except: 
@@ -133,8 +134,11 @@ def initialize_driver_instance():
     options.add_argument("--no-sandbox") 
     options.add_argument("--disable-dev-shm-usage") 
     options.add_argument("--remote-debugging-port=9222") 
-    # 💥 NOVO: Tenta forçar o Chrome a rodar em um único processo
     options.add_argument("--single-process") 
+    
+    # 💥 NOVAS FLAGS AGRESSIVAS PARA ESTABILIDADE E MEMÓRIA
+    options.add_argument("--shm-size=2g") # Aloca 2GB para shm
+    options.add_argument('--disable-site-isolation-trials') # Reduz a complexidade de processos
     # === FIM CRÍTICO ===
     
     options.add_argument("--disable-popup-blocking")
@@ -151,17 +155,17 @@ def initialize_driver_instance():
     options.add_argument('--disk-cache-size=0') 
     
     try:
-        # Simplifica para uma única tentativa, confiando que o ChromeDriver está no PATH.
-        # As flags agressivas devem corrigir a falha de inicialização do Chrome.
+        # Tenta o caminho mais simples, confiando no PATH do Square Cloud para o ChromeDriver
         return webdriver.Chrome(options=options)
     except Exception as e:
         print(f"❌ ERRO CRÍTICO NA INICIALIZAÇÃO DO DRIVER. Erro: {e}")
         # Tenta o caminho explícito do Linux/VPS como ÚLTIMO recurso
         try:
+             # Usa o Service explícito se o anterior falhar
              return webdriver.Chrome(service=Service("/usr/bin/chromedriver"), options=options)
         except Exception as fallback_e:
             print(f"❌ FALHA DE FALLBACK: Não foi possível iniciar o driver. Erro: {fallback_e}")
-            raise # Re-lança para que o supervisor tente reiniciar
+            raise
 
 
 def setup_tabs_and_login(driver):
@@ -316,7 +320,6 @@ def start_bot_thread(driver, bot_config: dict, game_handle: str):
         
         # 2. Reinício Diário (00:00)
         now_br = datetime.now(TZ_BR)
-        # Permite reinício entre 00:00 e 00:05
         if now_br.hour == 0 and now_br.minute <= 5: 
             print(f"⏰ {nome_log}: REINÍCIO DIÁRIO DETECTADO. SOLICITANDO REINÍCIO GERAL...")
             STOP_EVENT.set()
@@ -325,7 +328,7 @@ def start_bot_thread(driver, bot_config: dict, game_handle: str):
         sleep(POLLING_INTERVAL)
 
 # =============================================================
-# 🚀 SUPERVISOR (MAIN LOOP) - OTIMIZAÇÕES DE CLEANUP AQUI
+# 🚀 SUPERVISOR (MAIN LOOP)
 # =============================================================
 def rodar_ciclo_monitoramento():
     """Função que configura e roda um ciclo completo com threads até que precise reiniciar"""
@@ -365,6 +368,7 @@ def rodar_ciclo_monitoramento():
         # Garante que as threads parem
         STOP_EVENT.set() 
         for t in threads:
+            # Aumentado timeout de join para 5s para dar tempo às threads finalizarem
             if t.is_alive(): t.join(timeout=5) 
 
         if DRIVER:
