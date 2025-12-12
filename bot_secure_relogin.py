@@ -117,7 +117,7 @@ def initialize_driver_instance():
             subprocess.run("taskkill /f /im chrome.exe", shell=True, stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
     except: pass
 
-    options = webdriver.ChromeOptions()
+options = webdriver.ChromeOptions()
 options.add_argument("--headless=new")
 options.add_argument("--no-sandbox")
 options.add_argument("--disable-dev-shm-usage")
