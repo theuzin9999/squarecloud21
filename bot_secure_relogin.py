@@ -16,7 +16,7 @@ import threading
 import sys
 import subprocess
 import traceback
-from queue import Queue # 🔴 1️⃣ IMPORTAR FILA (NOVO)
+from queue import Queue 
 
 # =============================================================
 # ⚠️ CONTROLE GLOBAL DE THREADS E DRIVER
@@ -24,7 +24,7 @@ from queue import Queue # 🔴 1️⃣ IMPORTAR FILA (NOVO)
 DRIVER_LOCK = threading.Lock() 
 STOP_EVENT = threading.Event() 
 
-# 🔴 2️⃣ CRIAR FILA GLOBAL (NOVO)
+# CRIAR FILA GLOBAL
 firebase_queue = Queue(maxsize=1000) 
 
 # =============================================================
@@ -72,14 +72,14 @@ except Exception as e:
     print(f"\n❌ ERRO CRÍTICO NO FIREBASE: {e}")
     sys.exit()
 
-# 🔴 3️⃣ CRIAR WORKER ÚNICO DO FIREBASE (NOVO)
+# CRIAR WORKER ÚNICO DO FIREBASE
 def firebase_worker():
     """Worker persistente que processa a fila de envio de dados ao Firebase."""
     while True:
         # Pega a tarefa na fila (bloqueia até ter algo)
         path, data, nome = firebase_queue.get() 
         try:
-            # Lógica de envio (a mesma que estava antes)
+            # Lógica de envio 
             key = datetime.now(TZ_BR).strftime("%Y-%m-%d_%H-%M-%S-%f").replace('.', '')
             db.reference(f"{path}/{key}").set(data)
             print(f"🔥 [{nome.upper()}] {data['multiplier']}x às {data['time']}")
@@ -89,7 +89,7 @@ def firebase_worker():
             # Sinaliza que a tarefa foi concluída, permitindo o graceful shutdown
             firebase_queue.task_done()
 
-# Inicia o worker em uma thread Daemon (encerra quando o programa principal encerra)
+# Inicia o worker em uma thread Daemon 
 threading.Thread(target=firebase_worker, daemon=True).start()
 
 def getColorClass(value):
@@ -101,7 +101,7 @@ def getColorClass(value):
         return "default-bg"
     except: return "default-bg"
 
-# 🔴 4️⃣ FUNÇÃO enviar_firebase_async REMOVIDA
+# FUNÇÃO enviar_firebase_async REMOVIDA
 
 def verificar_modais_bloqueio(driver):
     """Fecha popups chatos"""
@@ -141,6 +141,13 @@ def initialize_driver_instance():
     options.add_argument("--log-level=3")
     options.add_argument("--silent")
     options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36")
+    
+    # ➕ NOVAS FLAGS DE OTIMIZAÇÃO PARA AMBIENTES SEM HEADLESS (Corrigir InvalidSessionIdException)
+    options.add_argument("--disable-gpu")
+    options.add_argument("--remote-debugging-pipe")
+    options.add_argument("--disable-extensions")
+    options.add_argument("--disable-software-rasterizer")
+    # FIM NOVAS FLAGS
     
     try:
         # Fallback para servidores Linux (Render/Heroku/VPS)
@@ -182,7 +189,8 @@ def setup_tabs_and_login(driver):
     
     # Aba 1 (Primeiro item da CONFIG_BOTS)
     config1 = CONFIG_BOTS[0]
-    driver.get(config1["link"])
+    # O erro InvalidSessionIdException está ocorrendo aqui
+    driver.get(config1["link"]) 
     sleep(5)
     handles[config1["firebase_path"]] = driver.current_window_handle
     print(f"✅ Aba {config1['nome']} configurada.")
@@ -269,11 +277,10 @@ def start_bot_thread(driver, bot_config: dict, game_handle: str):
                 iframe = None 
                 hist_element = None
                 
-                # *** AJUSTE DE DEBUG/LOGGING (NOVO) ***
+                # AJUSTE DE DEBUG/LOGGING 
                 # Loga a falha na busca e espera um pouco para dar tempo da página carregar
                 print(f"⚠️ [{nome_log}] Falha na busca/recuperação dos elementos. Tentando novamente... (Erro: {type(e).__name__})")
                 sleep(0.5) 
-                # **************************************
                 
                 continue 
         # === FIM DA SEÇÃO CRÍTICA ===
@@ -297,7 +304,7 @@ def start_bot_thread(driver, bot_config: dict, game_handle: str):
                         "date": now_br.strftime("%Y-%m-%d")
                     }
                     
-                    # 🔴 5️⃣ ONDE ENVIAVA FIREBASE → TROCAR POR FILA
+                    # ONDE ENVIAVA FIREBASE → TROCAR POR FILA
                     firebase_queue.put((firebase_path, payload, nome_log))
 
                     LAST_SENT = novo_valor
@@ -325,13 +332,13 @@ def rodar_ciclo_monitoramento():
     """Função que configura e roda um ciclo completo com threads até que precise reiniciar"""
     DRIVER = None
     STOP_EVENT.clear() 
+    threads = [] # ⬅️ CORREÇÃO: Inicializa aqui para garantir que 'finally' consiga acessar.
     
     try:
         print("\n🔵 INICIANDO NOVO CICLO DO NAVEGADOR...")
         DRIVER = initialize_driver_instance()
         handles = setup_tabs_and_login(DRIVER)
         
-        threads = []
         for config in CONFIG_BOTS:
             path = config["firebase_path"]
             handle = handles.get(path)
@@ -358,7 +365,7 @@ def rodar_ciclo_monitoramento():
     finally:
         # Garante que as threads parem e o driver feche
         STOP_EVENT.set() 
-        for t in threads:
+        for t in threads: # 'threads' está sempre definida agora
             if t.is_alive(): t.join(timeout=2) 
 
         if DRIVER:
