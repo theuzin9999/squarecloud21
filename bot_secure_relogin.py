@@ -6,13 +6,13 @@ from selenium.webdriver.common.by import By
 from webdriver_manager.chrome import ChromeDriverManager
 from time import sleep, time
 from datetime import datetime, date
-from selenium.common.exceptions import StaleElementReferenceException, TimeoutException
+from selenium.common.exceptions import StaleElementReferenceException, TimeoutException, NoSuchElementException # Importado NoSuch
 import firebase_admin
 from firebase_admin import credentials, db
 import os
 import pytz
 import logging
-import threading  # <--- IMPORTANTE PARA RODAR OS 2 AO MESMO TEMPO
+import threading
 
 # =============================================================
 # 🔥 GOATHBOT V6.0 - DUAL MODE (SERVER EDITION)
@@ -44,7 +44,7 @@ PASSWORD = os.getenv("PASSWORD")
 TZ_BR = pytz.timezone("America/Sao_Paulo")
 
 # Configurações Turbo
-POLLING_INTERVAL = 0.1          
+POLLING_INTERVAL = 0.5          # Aumentado para 0.5s para reduzir a sobrecarga e chance de Stale
 TEMPO_MAX_INATIVIDADE = 360     
 
 # =============================================================
@@ -65,7 +65,7 @@ def start_driver():
     options = webdriver.ChromeOptions()
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
-    options.add_argument("--headless=new") # Atualizado para nova flag headless
+    options.add_argument("--headless=new") 
     options.add_argument("--disable-gpu")
     options.add_argument("--window-size=1920,1080")
     options.page_load_strategy = 'eager'
@@ -120,10 +120,15 @@ def process_login(driver, target_link):
     driver.get(target_link)
     
     try:
-        WebDriverWait(driver, 15).until(
-            EC.presence_of_element_located((By.XPATH, '//iframe[contains(@src, "spribe") or contains(@src, "aviator")]'))
+        # Aumentado o timeout para a visibilidade do iframe
+        WebDriverWait(driver, 25).until( 
+            EC.visibility_of_element_located((By.XPATH, '//iframe[contains(@src, "spribe") or contains(@src, "aviator")]'))
         )
-    except: pass
+    except TimeoutException:
+        print(f"Timeout ao esperar pelo iframe em {target_link}")
+    except Exception:
+        pass # Não é crítico se falhar aqui, o initialize_game_elements vai tentar
+
         
     check_blocking_modals(driver)
     return True
@@ -136,6 +141,7 @@ def initialize_game_elements(driver):
     
     iframe = None
     try:
+        # Tenta novamente encontrar o iframe com 10s de timeout
         iframe = WebDriverWait(driver, 10).until(
             EC.presence_of_element_located((By.XPATH, '//iframe[contains(@src, "spribe") or contains(@src, "aviator")]'))
         )
@@ -145,8 +151,8 @@ def initialize_game_elements(driver):
 
     hist = None
     try:
-        # Payouts-block é mais comum para o container de histórico
-        hist = WebDriverWait(driver, 5).until(
+        # Aumentado o timeout para 15s para dar mais chance de encontrar o histórico
+        hist = WebDriverWait(driver, 15).until(
             EC.presence_of_element_located((By.CSS_SELECTOR, ".payouts-block, app-stats-widget"))
         )
     except:
@@ -182,7 +188,9 @@ def run_single_bot(bot_config):
             process_login(driver, link)
 
             iframe, hist = initialize_game_elements(driver)
-            if not hist: raise Exception("Elementos não encontrados") # Força o reinício
+            if not hist: 
+                print(f"❌ [{nome}] Falha crítica: Não foi possível encontrar o histórico.")
+                raise Exception("Elementos não encontrados") # Força o reinício
 
             print(f"🚀 [{nome}] MONITORANDO EM '{path_fb}'")
             
@@ -192,7 +200,6 @@ def run_single_bot(bot_config):
             while True: # Loop de leitura
                 # 1. Manutenção Diária
                 now_br = datetime.now(TZ_BR)
-                # Verifica entre 00:00 e 00:05 (ou ajuste para 23:59 se preferir essa hora)
                 if now_br.hour == 0 and now_br.minute <= 5 and (relogin_date != now_br.date()):
                     print(f"🌙 [{nome}] Reinício diário...")
                     driver.quit()
@@ -203,22 +210,26 @@ def run_single_bot(bot_config):
                 if (time() - ULTIMO_MULTIPLIER_TIME) > TEMPO_MAX_INATIVIDADE:
                     raise Exception("Inatividade detectada")
 
-                # 3. Leitura e Processamento (Corrigido para ser mais robusto)
+                # 3. Leitura e Processamento (USANDO WebDriverWait para esperar o elemento)
                 try:
                     # Tenta pegar apenas o primeiro multiplicador (mais recente)
-                    first_payout = hist.find_element(By.CSS_SELECTOR, ".payout:first-child, .bubble-multiplier:first-child")
+                    # Usa um timeout curto (3s) para esperar que o elemento apareça no container 'hist'
+                    first_payout = WebDriverWait(hist, 3).until(
+                        EC.presence_of_element_located((By.CSS_SELECTOR, ".payout:first-child, .bubble-multiplier:first-child"))
+                    )
+
                     raw_text = first_payout.get_attribute("innerText")
                     clean_text = raw_text.strip().lower().replace('x', '')
 
                     if not clean_text:
                         sleep(POLLING_INTERVAL)
-                        continue # Não há texto (ex: elemento vazio), apenas continua
+                        continue
 
                     try:
                         novo = float(clean_text)
                     except ValueError:
                         sleep(POLLING_INTERVAL)
-                        continue # Não é um número (ex: 'Aguardando'), apenas continua
+                        continue
                     
                     # 4. Envio
                     if novo != LAST_SENT:
@@ -242,18 +253,43 @@ def run_single_bot(bot_config):
 
                     sleep(POLLING_INTERVAL)
 
-                except (StaleElementReferenceException, TimeoutException, Exception) as e:
-                    # Em caso de erro de leitura (Stale, Timeout ou elemento sumiu)
-                    print(f"⚠️ [{nome}] Erro de leitura ('{e.__class__.__name__}'). Tentando re-inicializar elementos...")
+                except TimeoutException:
+                    # É comum que o elemento não apareça imediatamente (jogo Aguardando). Apenas ignora e continua.
+                    sleep(POLLING_INTERVAL)
+                    continue
+                except StaleElementReferenceException:
+                    # O elemento 'hist' (o container) ficou obsoleto. Tentamos re-inicializar
+                    print(f"⚠️ [{nome}] Stale Element Detectado. Tentando re-inicializar elementos...")
                     driver.switch_to.default_content()
                     iframe, hist = initialize_game_elements(driver)
                     
                     if not hist: 
-                        # Se não conseguir re-inicializar o elemento, força o reinício completo
                         raise Exception("Falha crítica ao re-inicializar elementos.")
                     
                     sleep(POLLING_INTERVAL)
-                    continue # Volta ao início do loop interno
+                    continue
+                except NoSuchElementException:
+                    # O elemento principal de histórico sumiu
+                    print(f"⚠️ [{nome}] NoSuchElement (Histórico). Tentando re-inicializar elementos...")
+                    driver.switch_to.default_content()
+                    iframe, hist = initialize_game_elements(driver)
+                    
+                    if not hist: 
+                        raise Exception("Falha crítica ao re-inicializar elementos.")
+
+                    sleep(POLLING_INTERVAL)
+                    continue
+                except Exception as e:
+                    # Qualquer outra exceção inesperada, força a re-inicialização completa
+                    print(f"⚠️ [{nome}] Erro de leitura inesperado ('{e.__class__.__name__}'). Tentando re-inicializar elementos...")
+                    driver.switch_to.default_content()
+                    iframe, hist = initialize_game_elements(driver)
+                    
+                    if not hist: 
+                        raise Exception("Falha crítica ao re-inicializar elementos.")
+                    
+                    sleep(POLLING_INTERVAL)
+                    continue
 
         except Exception as e:
             # Qualquer exceção que chega aqui (Inatividade, Falha Crítica, Login, etc.) força o reinício do driver
