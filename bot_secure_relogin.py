@@ -17,7 +17,7 @@ import sys
 import subprocess 
 
 # =============================================================
-# 🔥 GOATHBOT V7.1 - DUAL MONITORING (COMPATIBILIDADE MÁXIMA)
+# 🔥 GOATHBOT V6.6 - DUAL MONITORING (LEITURA DIRETA)
 # =============================================================
 SERVICE_ACCOUNT_FILE = 'serviceAccountKey.json'
 DATABASE_URL = 'https://history-dashboard-a70ee-default-rtdb.firebaseio.com'
@@ -45,9 +45,8 @@ EMAIL = os.getenv("EMAIL")
 PASSWORD = os.getenv("PASSWORD")
 TZ_BR = pytz.timezone("America/Sao_Paulo")
 
-POLLING_INTERVAL = 0.2 # Aumentado para 0.2s
-TEMPO_MAX_INATIVIDADE = 360  
-MAX_EMPTY_PAYOUTS_COUNT = 100 # Reduzido para 10s de falha (100 * 0.1s) antes de reiniciar o driver
+POLLING_INTERVAL = 0.1 
+TEMPO_MAX_INATIVIDADE = 360      
 
 # =============================================================
 # 🔧 FIREBASE
@@ -65,9 +64,7 @@ except Exception as e:
 # 🛠️ DRIVER E NAVEGAÇÃO
 # =============================================================
 def start_driver(nome_bot):
-    """Inicia o driver isolado."""
     try:
-        # Tenta matar processos antigos para garantir um início limpo
         subprocess.run("taskkill /f /im chromedriver.exe", shell=True, check=True, stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
     except: pass 
 
@@ -114,7 +111,6 @@ def check_blocking_modals(driver):
             break
 
 def process_login(driver, target_link):
-    """Faz o login e navega para o jogo."""
     try: driver.get(URL_DO_SITE)
     except: pass
     sleep(2)
@@ -138,7 +134,6 @@ def process_login(driver, target_link):
     return True
 
 def initialize_game_elements(driver, nome_bot):
-    """Busca apenas o Iframe e retorna-o."""
     try:
         driver.switch_to.default_content()
     except: pass
@@ -146,16 +141,20 @@ def initialize_game_elements(driver, nome_bot):
     iframe = None
     try:
         print(f"[{nome_bot}] 🔎 Buscando Iframe...")
-        iframe = WebDriverWait(driver, 20).until(
+        iframe = WebDriverWait(driver, 15).until(
             EC.presence_of_element_located((By.XPATH, '//iframe[contains(@src, "spribe") or contains(@src, "aviator")]'))
         )
-        return iframe
+        driver.switch_to.frame(iframe)
     except TimeoutException:
         print(f"[{nome_bot}] ❌ Timeout: Iframe não encontrado.")
         return None 
     except Exception as e:
         print(f"[{nome_bot}] ❌ Erro ao focar Iframe: {e}")
         return None
+
+    # Diferente do anterior, não precisamos retornar o 'hist' fixo, 
+    # pois vamos buscá-lo dinamicamente para evitar StaleElement
+    return iframe
 
 def getColorClass(value):
     try:
@@ -188,71 +187,46 @@ def run_single_bot(bot_config):
             if not process_login(driver, link):
                 raise Exception("Falha no login ou navegação")
 
-            # 1. Inicializa Iframe
+            # Inicializa apenas o iframe
             iframe = initialize_game_elements(driver, nome)
             if iframe is None:
                 raise Exception("Falha na inicialização do Iframe.")
-            
-            # 2. FORÇA ESPERA PELO CONTEÚDO DO JOGO
-            try:
-                # Foca o iframe
-                driver.switch_to.default_content()
-                driver.switch_to.frame(iframe) 
-                
-                # Espera que o elemento principal do histórico esteja na página (10 segundos)
-                WebDriverWait(driver, 10).until(
-                    EC.presence_of_element_located((By.CSS_SELECTOR, ".payouts-block, app-stats-widget"))
-                )
-                print(f"[{nome}] ✅ Elementos de leitura confirmados.")
-                
-            except TimeoutException:
-                raise Exception("Timeout: Elementos de histórico não carregaram após 10s.")
-            except Exception as e:
-                raise Exception(f"Erro ao confirmar elementos: {e}")
 
             print(f"🚀 [{nome}] MONITORANDO EM '{path_fb}'")
             
             LAST_SENT = None
             ULTIMO_MULTIPLIER_TIME = time()
             
-            # NOVO SELETOR: Combinação de todos os nomes de classes conhecidos que representam uma "bolha" de resultado.
-            SELECTOR_MULTIPLIER = ".payouts-block .payout, app-stats-widget .bubble-multiplier"
-            CONSECUTIVE_EMPTY_PAYOUTS = 0
+            # Seletor global robusto (pega tanto Aviator 1 quanto 2)
+            SELECTOR_MULTIPLIER = "app-stats-widget .bubble-multiplier, .payouts-block .payout, .bubble-multiplier, .payout"
             
             while True: # Loop Leitura
                 now_br = datetime.now(TZ_BR)
                 
-                # REINÍCIO DIÁRIO: 00:00 a 00:05
+                # Check Diário
                 if now_br.hour == 0 and now_br.minute <= 5 and (relogin_date != now_br.date()):
                     print(f"🌙 [{nome}] Reinício diário.")
                     relogin_date = now_br.date()
                     raise Exception("Reinício Diário")
 
+                # Check Inatividade
                 if (time() - ULTIMO_MULTIPLIER_TIME) > TEMPO_MAX_INATIVIDADE:
                     raise Exception("Inatividade detectada")
 
                 try:
-                    # REFORÇO DE FOCO: Garante foco no iframe a cada loop
+                    # Garante foco no iframe
                     driver.switch_to.default_content()
                     driver.switch_to.frame(iframe) 
                     
-                    # Usa find_elements para pegar TODOS os multiplicadores
+                    # BUSCA DIRETA (Evita StaleElement do pai)
                     payouts = driver.find_elements(By.CSS_SELECTOR, SELECTOR_MULTIPLIER)
                     
                     if not payouts:
-                        CONSECUTIVE_EMPTY_PAYOUTS += 1
-                        if CONSECUTIVE_EMPTY_PAYOUTS > MAX_EMPTY_PAYOUTS_COUNT:
-                             # Reinicia se falhar em encontrar o elemento por 20s
-                             raise Exception(f"Elemento de histórico não encontrado após {MAX_EMPTY_PAYOUTS_COUNT * POLLING_INTERVAL:.1f}s. Reiniciando driver.")
-                             
-                        # Se não encontrar, tenta focar o iframe novamente como segurança extra
+                        # Se não achou nada, espera um pouco
                         sleep(POLLING_INTERVAL)
                         continue 
                     
-                    # Reset o contador se a leitura foi bem-sucedida
-                    CONSECUTIVE_EMPTY_PAYOUTS = 0
-                    
-                    # Pegamos sempre o PRIMEIRO elemento da lista, que é o mais recente.
+                    # Pega o primeiro (geralmente o mais recente)
                     raw_text = payouts[0].get_attribute("innerText")
                     clean_text = raw_text.strip().lower().replace('x', '')
 
@@ -263,14 +237,8 @@ def run_single_bot(bot_config):
                     try:
                         novo = float(clean_text)
                     except ValueError:
-                        # Se o texto não for um número (ex: "Voando...", ou vazio), ignora
                         sleep(POLLING_INTERVAL)
                         continue
-                    
-                    # LOG DE RASTREIO: Mostra o que ele leu, mesmo que não salve
-                    if nome == "ORIGINAL" and novo != LAST_SENT:
-                         print(f"[{nome}] LIDO: {novo:.2f}x | ÚLTIMO SALVO: {LAST_SENT} | DIFERENTE?: {novo != LAST_SENT}")
-
                     
                     if novo != LAST_SENT:
                         ULTIMO_MULTIPLIER_TIME = time()
@@ -287,13 +255,13 @@ def run_single_bot(bot_config):
                             print(f"🔥 [{nome}] {entry['multiplier']}x")
                             LAST_SENT = novo
                         except Exception as e:
-                            pass
+                            pass # Ignora erro temporário de net
 
                     sleep(POLLING_INTERVAL)
 
                 except (StaleElementReferenceException, NoSuchElementException) as e:
-                    # Se o elemento morrer, tenta achar de novo o iframe
-                    print(f"⚠️ [{nome}] Elemento perdido. Tentando recuperar Iframe...")
+                    # Se o iframe morrer, tenta achar de novo
+                    print(f"⚠️ [{nome}] Iframe perdido. Recuperando...")
                     iframe_new = initialize_game_elements(driver, nome)
                     if iframe_new:
                         iframe = iframe_new
@@ -317,7 +285,7 @@ if __name__ == "__main__":
         sys.exit(1)
     
     print("==============================================")
-    print("    GOATHBOT V7.1 - DUAL MONITORING (FINAL)")
+    print("    GOATHBOT V6.6 - DUAL MONITORING (DIRECT)")
     print("==============================================")
 
     threads = []
