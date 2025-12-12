@@ -3,7 +3,7 @@ from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
-from webdriver_manager.chrome import ChromeDriverManager
+# REMOVIDO: from webdriver_manager.chrome import ChromeDriverManager (Não vamos usar para evitar conflito de versão)
 from time import sleep, time
 from datetime import datetime, date
 from selenium.common.exceptions import StaleElementReferenceException, TimeoutException, WebDriverException, NoSuchElementException
@@ -15,10 +15,10 @@ import logging
 import threading
 import sys
 import subprocess
-import gc # Garbage Collector
+import gc 
 
 # =============================================================
-# 🔥 GOATHBOT V7.4 - DUAL MONITORING (OTIMIZADO)
+# 🔥 GOATHBOT V7.5 - CORREÇÃO DE DRIVER SQUARE CLOUD
 # =============================================================
 SERVICE_ACCOUNT_FILE = 'serviceAccountKey.json'
 DATABASE_URL = 'https://history-dashboard-a70ee-default-rtdb.firebaseio.com'
@@ -37,18 +37,18 @@ CONFIG_BOTS = [
     }
 ]
 
-logging.getLogger('WDM').setLevel(logging.ERROR)
-os.environ['WDM_LOG_LEVEL'] = '0'
+# Configuração de Logs
+logging.basicConfig(level=logging.ERROR)
 
 EMAIL = os.getenv("EMAIL")
 PASSWORD = os.getenv("PASSWORD")
 TZ_BR = pytz.timezone("America/Sao_Paulo")
 
 # AJUSTES DE PERFORMANCE
-POLLING_INTERVAL = 0.5  # Aumentado para reduzir CPU (0.1 era muito agressivo)
+POLLING_INTERVAL = 0.5
 TEMPO_MAX_INATIVIDADE = 360
-MAX_EMPTY_PAYOUTS_COUNT = 60 # 30 segundos (60 * 0.5s)
-TEMPO_VIDA_DRIVER = 2700 # 45 minutos em segundos (Reinicia para limpar RAM)
+MAX_EMPTY_PAYOUTS_COUNT = 60
+TEMPO_VIDA_DRIVER = 2700 
 
 # =============================================================
 # 🔧 FIREBASE
@@ -63,13 +63,18 @@ except Exception as e:
     sys.exit(1)
 
 # =============================================================
-# 🛠️ DRIVER E NAVEGAÇÃO
+# 🛠️ DRIVER E NAVEGAÇÃO (CORRIGIDO PARA SQUARE CLOUD)
 # =============================================================
 def start_driver(nome_bot):
-    """Inicia o driver isolado com otimização de RAM."""
+    """Inicia o driver apontando para o binário do sistema."""
     options = webdriver.ChromeOptions()
     
-    # Flags críticas para rodar em container (SquareCloud) e economizar RAM
+    # ---------------------------------------------------------
+    # 🔴 CONFIGURAÇÃO CRÍTICA PARA SQUARE CLOUD / LINUX
+    # ---------------------------------------------------------
+    # Aponta explicitamente para o Chromium instalado no container
+    options.binary_location = "/usr/bin/chromium"
+    
     options.add_argument("--headless=new")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
@@ -77,22 +82,24 @@ def start_driver(nome_bot):
     options.add_argument("--disable-software-rasterizer")
     options.add_argument("--disable-extensions")
     options.add_argument("--disable-notifications")
-    options.add_argument("--disable-application-cache") # Desativa cache para economizar RAM
-    options.add_argument("--window-size=1366,768") # Resolução menor economiza processamento
+    options.add_argument("--window-size=1366,768")
     options.page_load_strategy = 'eager'
-    options.add_argument("--log-level=3")
-    options.add_argument("--silent")
     
-    # User-Agent fixo
-    options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36")
+    options.add_argument("user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 
     try:
-        # Tenta instalar o driver adequado
-        service = Service(ChromeDriverManager().install())
-        return webdriver.Chrome(service=service, options=options)
+        # Tenta usar o Selenium Manager nativo (sem ChromeDriverManager)
+        # O Selenium 4.10+ detecta automaticamente o driver compatível com o binary_location
+        return webdriver.Chrome(options=options)
     except Exception as e:
-        print(f"❌ [{nome_bot}] Erro ao criar driver: {e}")
-        return None
+        print(f"❌ [{nome_bot}] Erro driver (Tentativa 1): {e}")
+        # Fallback de segurança caso o path padrão falhe (tenta sem binary_location)
+        try:
+            options.binary_location = "" # Reseta path
+            return webdriver.Chrome(options=options)
+        except Exception as e2:
+            print(f"❌ [{nome_bot}] FALHA TOTAL DRIVER: {e2}")
+            return None
 
 def safe_click(driver, by, value, timeout=5):
     try:
@@ -103,7 +110,6 @@ def safe_click(driver, by, value, timeout=5):
     except: return False
 
 def check_blocking_modals(driver):
-    # Lista otimizada de modais
     xpaths = [
         "//button[contains(., 'Sim')]", 
         "//button[contains(., 'Aceitar')]",
@@ -111,13 +117,11 @@ def check_blocking_modals(driver):
     ]
     for xp in xpaths:
         try:
-            # Tempo curto para não travar a thread
             if safe_click(driver, By.XPATH, xp, 1):
                 sleep(0.5)
         except: pass
 
 def process_login(driver, target_link):
-    """Faz o login e navega para o jogo."""
     try: 
         driver.get(URL_DO_SITE)
         sleep(2)
@@ -125,14 +129,12 @@ def process_login(driver, target_link):
     
     check_blocking_modals(driver)
 
-    # Verifica se precisa logar
     if safe_click(driver, By.XPATH, "//button[contains(., 'Entrar')]", 3) or \
        safe_click(driver, By.CSS_SELECTOR, 'a[href*="login"]', 3):
         sleep(1)
         try:
             driver.find_element(By.NAME, "email").send_keys(EMAIL)
             driver.find_element(By.NAME, "password").send_keys(PASSWORD)
-            
             if safe_click(driver, By.CSS_SELECTOR, "button[type='submit']", 5):
                 sleep(3)
         except: 
@@ -144,7 +146,6 @@ def process_login(driver, target_link):
     return True
 
 def initialize_game_elements(driver, nome_bot):
-    """Busca apenas o Iframe e retorna-o."""
     try: driver.switch_to.default_content()
     except: pass
     
@@ -178,29 +179,25 @@ def run_single_bot(bot_config):
     link = bot_config["link"]
     path_fb = bot_config["firebase_path"]
     
-    relogin_date = date.today()
-
     while True: # Ciclo de Reinicialização do Driver
         driver = None
-        start_time_driver = time() # Marca a hora que o driver iniciou
+        start_time_driver = time()
 
         try:
             print(f"\n🔄 [{nome}] Iniciando novo ciclo de driver...")
             driver = start_driver(nome)
             
             if driver is None:
-                sleep(5)
+                sleep(10)
                 continue
             
             if not process_login(driver, link):
                 raise Exception("Falha no login ou navegação")
 
-            # 1. Inicializa Iframe
             iframe = initialize_game_elements(driver, nome)
             if iframe is None:
                 raise Exception("Falha na inicialização do Iframe.")
             
-            # 2. Aguarda carregamento visual
             try:
                 driver.switch_to.default_content()
                 driver.switch_to.frame(iframe) 
@@ -214,18 +211,14 @@ def run_single_bot(bot_config):
             LAST_SENT = None
             ULTIMO_MULTIPLIER_TIME = time()
             CONSECUTIVE_EMPTY_PAYOUTS = 0
-            
             SELECTOR_MULTIPLIER = ".payouts-block .payout, .payout.ng-star-inserted, app-stats-widget .bubble-multiplier"
 
-            # LOOP DE LEITURA (Ciclo Rápido)
             while True: 
-                # 1. Checagem de Reinício Programado (Limpeza de RAM)
                 uptime = time() - start_time_driver
                 if uptime > TEMPO_VIDA_DRIVER:
                     print(f"♻️ [{nome}] Reinício preventivo de memória ({uptime/60:.0f} min).")
-                    break # Sai do loop de leitura e reinicia o driver
+                    break 
 
-                # 2. Checagem de Inatividade
                 if (time() - ULTIMO_MULTIPLIER_TIME) > TEMPO_MAX_INATIVIDADE:
                     raise Exception("Inatividade detectada no jogo.")
 
@@ -244,12 +237,10 @@ def run_single_bot(bot_config):
                     
                     CONSECUTIVE_EMPTY_PAYOUTS = 0
                     
-                    # Leitura dos dados
                     raw_text = payouts[0].get_attribute("innerText")
                     clean_text = raw_text.strip().lower().replace('x', '')
 
                     if not clean_text:
-                        # Fallback
                         clean_text = payouts[0].get_attribute("data-value")
 
                     try:
@@ -258,7 +249,6 @@ def run_single_bot(bot_config):
                         sleep(POLLING_INTERVAL)
                         continue
                     
-                    # Envio ao Firebase
                     if novo != LAST_SENT:
                         now_br = datetime.now(TZ_BR)
                         ULTIMO_MULTIPLIER_TIME = time()
@@ -271,8 +261,6 @@ def run_single_bot(bot_config):
                         }
                         key = now_br.strftime("%Y-%m-%d_%H-%M-%S-%f").replace('.', '-')
                         
-                        # Thread lock não é estritamente necessário para operações de rede simples,
-                        # mas try/except é vital.
                         try:
                             db.reference(f"{path_fb}/{key}").set(entry)
                             print(f"🔥 [{nome}] {entry['multiplier']}x")
@@ -282,39 +270,29 @@ def run_single_bot(bot_config):
                     sleep(POLLING_INTERVAL)
 
                 except (StaleElementReferenceException, NoSuchElementException):
-                    # Tenta recuperar o iframe sem reiniciar tudo
                     iframe = initialize_game_elements(driver, nome)
                     if not iframe: break 
                 except Exception:
-                    break # Quebra para reiniciar o driver
+                    break 
 
         except Exception as e:
             print(f"❌ [{nome}] Erro: {e}. Reiniciando em 5s...")
         
         finally:
-            # Limpeza robusta ao sair do ciclo do driver
             if driver:
                 try: driver.quit()
                 except: pass
             driver = None
-            gc.collect() # Força coleta de lixo do Python
+            gc.collect() 
             sleep(5)
 
 if __name__ == "__main__":
-    # Limpeza Inicial Global (Apenas uma vez no boot)
-    try:
-        if os.name == 'nt': # Só roda no Windows
-            subprocess.run("taskkill /f /im chromedriver.exe", shell=True, stderr=subprocess.DEVNULL)
-            subprocess.run("taskkill /f /im chrome.exe", shell=True, stderr=subprocess.DEVNULL)
-    except: pass
-
     if not EMAIL or not PASSWORD:
         print("❗ Configure EMAIL e PASSWORD.")
         sys.exit(1)
     
     print("==============================================")
-    print(f"    GOATHBOT V7.4 - OTIMIZADO (RAM/CPU)")
-    print(f"    Monitorando: {[b['nome'] for b in CONFIG_BOTS]}")
+    print(f"    GOATHBOT V7.5 - FIX SQUARE CLOUD")
     print("==============================================")
 
     threads = []
@@ -322,8 +300,7 @@ if __name__ == "__main__":
         t = threading.Thread(target=run_single_bot, args=(config,))
         t.start()
         threads.append(t)
-        # Delay importante entre o start das threads para não sobrecarregar CPU no boot
-        sleep(10) 
+        sleep(15) # Aumentei o delay para garantir que o Chrome 1 suba completamente antes do 2
 
     try:
         for t in threads:
