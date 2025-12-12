@@ -1,114 +1,182 @@
-import threading
-import time
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.common.by import By
 from webdriver_manager.chrome import ChromeDriverManager
+from selenium.common.exceptions import StaleElementReferenceException, NoSuchElementException
 
-# --- CONFIGURAÇÕES ---
-# Coloque aqui sua integração com Firebase se necessário
-def enviar_firebase(nome_bot, valor):
-    # print(f"✅ [{nome_bot}] Enviando para Firebase: {valor}")
-    pass
+from time import sleep, time
+from datetime import datetime
+import threading
+import firebase_admin
+from firebase_admin import credentials, db
+import pytz
+import os
+import sys
+import gc
 
-class AviatorMonitor:
-    def __init__(self, nome, url, firebase_path):
-        self.nome = nome
-        self.url = url
-        self.firebase_path = firebase_path
-        self.ultimo_valor = None
-        
-        # Configuração do Chrome
-        options = Options()
-        options.add_argument("--start-maximized")
-        options.add_argument("--disable-notifications")
-        # options.add_argument("--headless") # Descomente para rodar sem ver a janela
-        
-        self.driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
+# =============================================================
+# 🔥 CONFIGURAÇÃO GERAL
+# =============================================================
+SERVICE_ACCOUNT_FILE = "serviceAccountKey.json"
+DATABASE_URL = "https://history-dashboard-a70ee-default-rtdb.firebaseio.com"
 
-    def iniciar(self):
-        print(f"🔄 [{self.nome}] Iniciando driver e navegando...")
-        self.driver.get(self.url)
-        
-        if self.preparar_jogo():
-            self.monitorar()
+EMAIL = os.getenv("EMAIL")
+PASSWORD = os.getenv("PASSWORD")
 
-    def preparar_jogo(self):
-        """ Lógica robusta para entrar no iframe e carregar o histórico """
+TZ_BR = pytz.timezone("America/Sao_Paulo")
+
+POLLING_INTERVAL = 0.05
+TEMPO_MAX_INATIVIDADE = 360  # 6 minutos
+
+IFRAME_XPATH = '//iframe[contains(@src,"spribe") or contains(@src,"aviator")]'
+HIST_SELECTOR = "app-stats-widget, .payouts-block"
+PAYOUT_SELECTOR = ".payout:first-child, .bubble-multiplier:first-child"
+
+# =============================================================
+# 🔥 FIREBASE
+# =============================================================
+if not firebase_admin._apps:
+    cred = credentials.Certificate(SERVICE_ACCOUNT_FILE)
+    firebase_admin.initialize_app(cred, {"databaseURL": DATABASE_URL})
+
+# =============================================================
+# 🧩 UTIL
+# =============================================================
+def getColorClass(v):
+    v = float(v)
+    if v < 2: return "blue-bg"
+    if v < 10: return "purple-bg"
+    return "magenta-bg"
+
+
+def start_driver():
+    options = webdriver.ChromeOptions()
+    options.add_argument("--headless=new")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--disable-gpu")
+    options.add_argument("--window-size=1920,1080")
+    options.page_load_strategy = "eager"
+
+    try:
+        return webdriver.Chrome(
+            service=Service(ChromeDriverManager().install()),
+            options=options
+        )
+    except:
+        return webdriver.Chrome(options=options)
+
+
+def login(driver):
+    driver.get("https://www.goathbet.com")
+    sleep(4)
+
+    try:
+        driver.find_element(By.XPATH, "//button[contains(.,'Entrar')]").click()
+        sleep(2)
+        driver.find_element(By.NAME, "email").send_keys(EMAIL)
+        driver.find_element(By.NAME, "password").send_keys(PASSWORD)
+        driver.find_element(By.CSS_SELECTOR, "button[type='submit']").click()
+        sleep(6)
+    except:
+        pass
+
+
+def init_game(driver, link):
+    driver.get(link)
+    sleep(5)
+
+    iframe = WebDriverWait(driver, 20).until(
+        EC.presence_of_element_located((By.XPATH, IFRAME_XPATH))
+    )
+    driver.switch_to.frame(iframe)
+
+    hist = WebDriverWait(driver, 15).until(
+        EC.presence_of_element_located((By.CSS_SELECTOR, HIST_SELECTOR))
+    )
+
+    return iframe, hist
+
+
+def capture_loop(nome, link, firebase_path):
+    driver = None
+
+    while True:
         try:
-            wait = WebDriverWait(self.driver, 30)
-            
-            # 1. Aguarda o Iframe do jogo aparecer e entra nele
-            print(f"🌍 [{self.nome}] Aguardando carregamento do jogo (Iframe)...")
-            iframe = wait.until(EC.presence_of_element_located((By.XPATH, "//iframe[contains(@src, 'spribe')]")))
-            self.driver.switch_to.frame(iframe)
-            
-            # 2. Aguarda o elemento do histórico (as bolinhas) aparecer
-            print(f"🚀 [{self.nome}] Localizando histórico de velas...")
-            wait.until(EC.presence_of_element_located((By.CLASS_NAME, "payouts-block")))
-            
-            print(f"✅ [{self.nome}] MONITORANDO COM SUCESSO!")
-            return True
-        except Exception as e:
-            print(f"❌ [{self.nome}] Erro ao carregar jogo: {e}")
-            self.driver.quit()
-            return False
+            driver = start_driver()
+            login(driver)
 
-    def monitorar(self):
-        while True:
-            try:
-                # Busca o primeiro item do histórico (o multiplicador mais recente)
-                # O seletor '.payouts-block .bubble-multiplier' costuma ser o padrão Spribe
-                elementos = self.driver.find_elements(By.CSS_SELECTOR, ".payouts-block .bubble-multiplier")
-                
-                if elementos:
-                    valor_atual = elementos[0].text.replace('x', '').strip()
-                    
-                    if valor_atual != self.ultimo_valor:
-                        self.ultimo_valor = valor_atual
-                        print(f"🔥 [{self.nome}] NOVO MULTIPLICADOR: {valor_atual}x")
-                        enviar_firebase(self.nome, valor_atual)
-                
-                time.sleep(1) # Delay para não sobrecarregar a CPU
-            except Exception as e:
-                print(f"⚠️ [{self.nome}] Erro durante monitoramento: {e}")
-                time.sleep(5)
-                # Se o iframe cair, tenta voltar para o foco principal e reentrar
+            iframe, hist = init_game(driver, link)
+
+            last_sent = None
+            last_time = time()
+
+            print(f"🚀 {nome} iniciado")
+
+            while True:
                 try:
-                    self.driver.switch_to.default_content()
-                    iframe = self.driver.find_element(By.XPATH, "//iframe[contains(@src, 'spribe')]")
-                    self.driver.switch_to.frame(iframe)
-                except:
-                    pass
+                    payout = hist.find_element(By.CSS_SELECTOR, PAYOUT_SELECTOR)
+                    raw = payout.text.lower().replace("x", "").strip()
+                    if not raw:
+                        continue
 
-# --- EXECUÇÃO EM MULTI-THREADING ---
+                    mult = float(raw)
 
+                    if mult != last_sent:
+                        now = datetime.now(TZ_BR)
+                        payload = {
+                            "multiplier": f"{mult:.2f}",
+                            "time": now.strftime("%H:%M:%S"),
+                            "date": now.strftime("%Y-%m-%d"),
+                            "color": getColorClass(mult)
+                        }
+                        key = now.strftime("%Y-%m-%d_%H-%M-%S-%f")
+                        db.reference(f"{firebase_path}/{key}").set(payload)
+
+                        print(f"🔥 [{nome}] {payload['multiplier']}x")
+                        last_sent = mult
+                        last_time = time()
+
+                except (StaleElementReferenceException, NoSuchElementException):
+                    iframe, hist = init_game(driver, link)
+
+                if time() - last_time > TEMPO_MAX_INATIVIDADE:
+                    raise Exception("Inatividade")
+
+                sleep(POLLING_INTERVAL)
+
+        except Exception as e:
+            print(f"♻️ Reiniciando {nome}: {e}")
+            try:
+                driver.quit()
+            except:
+                pass
+            gc.collect()
+            sleep(5)
+
+
+# =============================================================
+# 🚀 MAIN
+# =============================================================
 if __name__ == "__main__":
-    print("==============================================")
-    print("    GOATHBOT V6.2 - DUAL MONITORING STABLE    ")
-    print("==============================================")
+    if not EMAIL or not PASSWORD:
+        print("❌ Configure EMAIL e PASSWORD")
+        sys.exit(1)
 
-    # Definição dos bots
-    bot_original = AviatorMonitor(
-        "ORIGINAL", 
-        "https://www.goathbet.com/pt/casino/spribe/aviator", 
-        "history"
-    )
-    
-    bot_aviator2 = AviatorMonitor(
-        "AVIATOR 2", 
-        "https://www.goathbet.com/pt/casino/spribe/aviator-2", 
-        "aviator2"
+    t1 = threading.Thread(
+        target=capture_loop,
+        args=("AVIATOR 1", "https://www.goathbet.com/pt/casino/spribe/aviator", "history"),
+        daemon=True
     )
 
-    # Criando as Threads para rodar os dois ao mesmo tempo
-    t1 = threading.Thread(target=bot_original.iniciar)
-    t2 = threading.Thread(target=bot_aviator2.iniciar)
+    t2 = threading.Thread(
+        target=capture_loop,
+        args=("AVIATOR 2", "https://www.goathbet.com/pt/casino/spribe/aviator-2", "aviator2"),
+        daemon=True
+    )
 
-    # Inicia os processos
     t1.start()
     t2.start()
 
