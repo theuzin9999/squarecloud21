@@ -24,7 +24,7 @@ DRIVER_LOCK = threading.Lock()
 STOP_EVENT = threading.Event() 
 
 # =============================================================
-# 🔥 GOATHBOT V6.1 - DUAL MODE (UNIFICADO)
+# 🔥 GOATHBOT V6.1 - DUAL MODE (UNIFICADO E CORRIGIDO)
 # =============================================================
 SERVICE_ACCOUNT_FILE = 'serviceAccountKey.json'
 DATABASE_URL = 'https://history-dashboard-a70ee-default-rtdb.firebaseio.com'
@@ -96,11 +96,10 @@ def verificar_modais_bloqueio(driver):
         "//button[@data-age-action='yes']", 
         "//div[contains(text(), '18')]/following::button[1]",
         "//button[contains(., 'Aceitar')]",
-        "//button[contains(., 'Fechar')]" # Adicionado
+        "//button[contains(., 'Fechar')]" 
     ]
     for xp in xpaths:
         try:
-            # Não usa safe_click aqui para evitar que espere muito em uma thread principal
             btn = driver.find_element(By.XPATH, xp)
             if btn.is_displayed(): 
                 driver.execute_script("arguments[0].click();", btn)
@@ -120,7 +119,7 @@ def initialize_driver_instance():
 
     options = webdriver.ChromeOptions()
     options.page_load_strategy = 'eager'
-    options.add_argument("--headless=new") # Atualizado para nova flag headless
+    options.add_argument("--headless=new") 
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-popup-blocking")
@@ -134,7 +133,8 @@ def initialize_driver_instance():
         return webdriver.Chrome(service=Service("/usr/bin/chromedriver"), options=options)
     except:
         # Padrão
-        return webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
+        # service = Service(ChromeDriverManager().install()) # Remover se estiver usando VPS sem WDM
+        return webdriver.Chrome(options=options)
 
 
 def setup_tabs_and_login(driver):
@@ -147,8 +147,8 @@ def setup_tabs_and_login(driver):
         sleep(3)
         verificar_modais_bloqueio(driver)
 
-        # Clica em Entrar
-        btns = driver.find_elements(By.XPATH, "//button[contains(., 'Entrar')] | a[href*='login']")
+        # CORREÇÃO CRÍTICA DO XPATH
+        btns = driver.find_elements(By.XPATH, "//button[contains(., 'Entrar')] | //a[contains(@href, 'login')]") 
         if btns: 
             driver.execute_script("arguments[0].click();", btns[0])
             sleep(1)
@@ -203,7 +203,7 @@ def find_game_elements(driver, game_handle):
         )
         driver.switch_to.frame(iframe)
         
-        hist = WebDriverWait(driver, 5).until( # Tempo menor, pois o frame já deve estar carregado
+        hist = WebDriverWait(driver, 5).until( 
             EC.presence_of_element_located((By.CSS_SELECTOR, "app-stats-widget, .payouts-block, .payouts-block__list"))
         )
         return iframe, hist
@@ -250,15 +250,10 @@ def start_bot_thread(driver, bot_config: dict, game_handle: str):
                 first_payout = hist_element.find_element(By.CSS_SELECTOR, ".payout:first-child, .bubble-multiplier:first-child")
                 raw_text = first_payout.get_attribute("innerText")
                 
-            except (StaleElementReferenceException, NoSuchElementException, Exception) as e:
+            except (StaleElementReferenceException, NoSuchElementException, Exception):
                 # Sinaliza que precisamos re-buscar no próximo ciclo
                 iframe = None 
                 hist_element = None
-                # Se for um erro crítico, pode forçar um reinício geral
-                # if e.__class__.__name__ == 'WebDriverException':
-                #     STOP_EVENT.set() 
-                #     print(f"🚨 {nome_log}: WebDriverException. Solicitando Reinício Geral.")
-                #     return
                 continue 
         # === FIM DA SEÇÃO CRÍTICA ===
         
@@ -292,9 +287,8 @@ def start_bot_thread(driver, bot_config: dict, game_handle: str):
             STOP_EVENT.set() 
             return 
         
-        # 2. Reinício Diário (23:59/00:00) - Usando a hora 00:00 para ser mais seguro
+        # 2. Reinício Diário (00:00)
         now_br = datetime.now(TZ_BR)
-        # Verifica no inicio do dia, logo após a meia-noite.
         if now_br.hour == 0 and now_br.minute <= 5: 
             print(f"⏰ {nome_log}: REINÍCIO DIÁRIO DETECTADO. SOLICITANDO REINÍCIO GERAL...")
             STOP_EVENT.set()
@@ -343,7 +337,7 @@ def rodar_ciclo_monitoramento():
         # Garante que as threads parem e o driver feche
         STOP_EVENT.set() 
         for t in threads:
-            if t.is_alive(): t.join(timeout=2) # Tenta juntar a thread por 2s
+            if t.is_alive(): t.join(timeout=2) 
 
         if DRIVER:
             try:
