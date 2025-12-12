@@ -101,8 +101,7 @@ def getColorClass(value):
         return "default-bg"
     except: return "default-bg"
 
-# 🔴 4️⃣ SUBSTITUIR COMPLETAMENTE enviar_firebase_async (FUNÇÃO ANTIGA FOI REMOVIDA)
-# A chamada de envio agora é diretamente para a fila.
+# 🔴 4️⃣ FUNÇÃO enviar_firebase_async REMOVIDA
 
 def verificar_modais_bloqueio(driver):
     """Fecha popups chatos"""
@@ -265,10 +264,17 @@ def start_bot_thread(driver, bot_config: dict, game_handle: str):
                 first_payout = hist_element.find_element(By.CSS_SELECTOR, ".payout:first-child, .bubble-multiplier:first-child")
                 raw_text = first_payout.get_attribute("innerText")
                 
-            except (StaleElementReferenceException, NoSuchElementException, Exception):
+            except (StaleElementReferenceException, NoSuchElementException, Exception) as e:
                 # Sinaliza que precisamos re-buscar no próximo ciclo
                 iframe = None 
                 hist_element = None
+                
+                # *** AJUSTE DE DEBUG/LOGGING (NOVO) ***
+                # Loga a falha na busca e espera um pouco para dar tempo da página carregar
+                print(f"⚠️ [{nome_log}] Falha na busca/recuperação dos elementos. Tentando novamente... (Erro: {type(e).__name__})")
+                sleep(0.5) 
+                # **************************************
+                
                 continue 
         # === FIM DA SEÇÃO CRÍTICA ===
         
