@@ -129,7 +129,6 @@ def process_login(driver, target_link):
     return True
 
 def initialize_game_elements(driver):
-    """Tenta localizar o iframe e o elemento de histórico."""
     try:
         driver.switch_to.default_content()
     except: pass
@@ -145,7 +144,6 @@ def initialize_game_elements(driver):
 
     hist = None
     try:
-        # Payouts-block é mais comum para o container de histórico
         hist = WebDriverWait(driver, 5).until(
             EC.presence_of_element_located((By.CSS_SELECTOR, ".payouts-block, app-stats-widget"))
         )
@@ -182,7 +180,7 @@ def run_single_bot(bot_config):
             process_login(driver, link)
 
             iframe, hist = initialize_game_elements(driver)
-            if not hist: raise Exception("Elementos não encontrados") # Força o reinício
+            if not hist: raise Exception("Elementos não encontrados")
 
             print(f"🚀 [{nome}] MONITORANDO EM '{path_fb}'")
             
@@ -190,73 +188,70 @@ def run_single_bot(bot_config):
             ULTIMO_MULTIPLIER_TIME = time()
             
             while True: # Loop de leitura
-                # 1. Manutenção Diária
+                # 1. Manutenção Diária (específica desta thread)
                 now_br = datetime.now(TZ_BR)
-                # Verifica entre 00:00 e 00:05 (ou ajuste para 23:59 se preferir essa hora)
                 if now_br.hour == 0 and now_br.minute <= 5 and (relogin_date != now_br.date()):
                     print(f"🌙 [{nome}] Reinício diário...")
                     driver.quit()
                     relogin_date = now_br.date()
                     break # Sai do loop de leitura para reiniciar driver
 
-                # 2. Check Inatividade (6 minutos sem novo multiplicador)
+                # 2. Check Inatividade
                 if (time() - ULTIMO_MULTIPLIER_TIME) > TEMPO_MAX_INATIVIDADE:
                     raise Exception("Inatividade detectada")
 
-                # 3. Leitura e Processamento (Corrigido para ser mais robusto)
+                # 3. Leitura
                 try:
-                    # Tenta pegar apenas o primeiro multiplicador (mais recente)
-                    first_payout = hist.find_element(By.CSS_SELECTOR, ".payout:first-child, .bubble-multiplier:first-child")
-                    raw_text = first_payout.get_attribute("innerText")
-                    clean_text = raw_text.strip().lower().replace('x', '')
-
-                    if not clean_text:
-                        sleep(POLLING_INTERVAL)
-                        continue # Não há texto (ex: elemento vazio), apenas continua
-
+                    resultados = []
+                    # Tenta pegar itens individuais
                     try:
-                        novo = float(clean_text)
-                    except ValueError:
-                        sleep(POLLING_INTERVAL)
-                        continue # Não é um número (ex: 'Aguardando'), apenas continua
-                    
+                        items = hist.find_elements(By.CSS_SELECTOR, ".payout, .bubble-multiplier")
+                        for it in items:
+                            txt = it.get_attribute("innerText").strip().replace("x", "")
+                            if txt: resultados.append(float(txt))
+                    except: pass
+
+                    # Fallback Texto Bruto
+                    if not resultados:
+                        txt_full = hist.get_attribute("innerText").replace('x', '').replace('\n', ' ')
+                        for val in txt_full.split():
+                            try:
+                                v = float(val)
+                                if v >= 1.0: resultados.append(v)
+                            except: pass
+
                     # 4. Envio
-                    if novo != LAST_SENT:
-                        ULTIMO_MULTIPLIER_TIME = time()
-                        now_br = datetime.now(TZ_BR)
+                    if resultados:
+                        # Pega o primeiro valor (mais recente)
+                        novo = resultados[0]
                         
-                        entry = {
-                            "multiplier": f"{novo:.2f}",
-                            "time": now_br.strftime("%H:%M:%S"),
-                            "color": getColorClass(novo),
-                            "date": now_br.strftime("%Y-%m-%d")
-                        }
-                        key = now_br.strftime("%Y-%m-%d_%H-%M-%S-%f").replace('.', '-')
-                        
-                        try:
-                            db.reference(f"{path_fb}/{key}").set(entry)
-                            print(f"🔥 [{nome}] {entry['multiplier']}x")
-                            LAST_SENT = novo
-                        except Exception as e:
-                            print(f"⚠️ [{nome}] Erro Firebase: {e}")
+                        if novo != LAST_SENT:
+                            ULTIMO_MULTIPLIER_TIME = time()
+                            now_br = datetime.now(TZ_BR)
+                            
+                            entry = {
+                                "multiplier": f"{novo:.2f}",
+                                "time": now_br.strftime("%H:%M:%S"),
+                                "color": getColorClass(novo),
+                                "date": now_br.strftime("%Y-%m-%d")
+                            }
+                            key = now_br.strftime("%Y-%m-%d_%H-%M-%S-%f").replace('.', '-')
+                            
+                            try:
+                                db.reference(f"{path_fb}/{key}").set(entry)
+                                print(f"🔥 [{nome}] {entry['multiplier']}x")
+                                LAST_SENT = novo
+                            except Exception as e:
+                                print(f"⚠️ [{nome}] Erro Firebase: {e}")
 
                     sleep(POLLING_INTERVAL)
 
-                except (StaleElementReferenceException, TimeoutException, Exception) as e:
-                    # Em caso de erro de leitura (Stale, Timeout ou elemento sumiu)
-                    print(f"⚠️ [{nome}] Erro de leitura ('{e.__class__.__name__}'). Tentando re-inicializar elementos...")
+                except (StaleElementReferenceException, TimeoutException):
                     driver.switch_to.default_content()
                     iframe, hist = initialize_game_elements(driver)
-                    
-                    if not hist: 
-                        # Se não conseguir re-inicializar o elemento, força o reinício completo
-                        raise Exception("Falha crítica ao re-inicializar elementos.")
-                    
-                    sleep(POLLING_INTERVAL)
-                    continue # Volta ao início do loop interno
+                    if not hist: raise Exception("Conexão perdida elemento")
 
         except Exception as e:
-            # Qualquer exceção que chega aqui (Inatividade, Falha Crítica, Login, etc.) força o reinício do driver
             print(f"❌ [{nome}] Falha: {e}. Reiniciando em 5s...")
             if driver:
                 try: driver.quit()
