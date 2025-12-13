@@ -3,18 +3,16 @@ from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
-# =================================================================
 from webdriver_manager.chrome import ChromeDriverManager
-# =================================================================
 from time import sleep, time
 from datetime import datetime, date
-from selenium.common.exceptions import StaleElementReferenceException, TimeoutException, TimeoutException
+from selenium.common.exceptions import StaleElementReferenceException, TimeoutException
 import firebase_admin
 from firebase_admin import credentials, db
 import os
 import pytz
 import logging
-import threading  
+import threading  # <--- IMPORTANTE PARA RODAR OS 2 AO MESMO TEMPO
 
 # =============================================================
 # 🔥 GOATHBOT V6.0 - DUAL MODE (SERVER EDITION)
@@ -63,11 +61,11 @@ except Exception as e:
 # =============================================================
 # 🛠️ DRIVER E NAVEGAÇÃO
 # =============================================================
-def start_driver(nome_bot): # Recebe o nome para log
+def start_driver():
     options = webdriver.ChromeOptions()
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
-    options.add_argument("--headless=new") 
+    options.add_argument("--headless=new") # Atualizado para nova flag headless
     options.add_argument("--disable-gpu")
     options.add_argument("--window-size=1920,1080")
     options.page_load_strategy = 'eager'
@@ -75,22 +73,11 @@ def start_driver(nome_bot): # Recebe o nome para log
     options.add_argument("--log-level=3")
     options.add_argument("--silent")
 
-    # Tenta a instalação automática (mais robusto), usando o fallback com log.
     try:
-        print(f"[{nome_bot}]    -> Tentando ChromeDriverManager (Busca automática)...")
-        # Sem especificar a versão, confiando na checagem do WDM.
-        # Se falhar na checagem, a exceção será capturada.
         return webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
-    except Exception as e_wdm:
-        print(f"[{nome_bot}]    -> Falha no ChromeDriverManager: {e_wdm}")
-        # Fallback para o caminho estático (Square Cloud usa /usr/bin/chromium-chromedriver)
-        try:
-            print(f"[{nome_bot}]    -> Tentando caminho estático /usr/bin/chromedriver...")
-            return webdriver.Chrome(service=Service("/usr/bin/chromedriver"), options=options)
-        except Exception as e_static:
-            print(f"[{nome_bot}]    -> Falha no caminho estático: {e_static}")
-            raise Exception(f"Falha CRÍTICA ao iniciar o WebDriver em AMBOS os métodos.")
-
+    except:
+        # Fallback para servidores Linux (Render/Heroku/VPS)
+        return webdriver.Chrome(service=Service("/usr/bin/chromedriver"), options=options)
 
 def safe_click(driver, by, value, timeout=5):
     try:
@@ -129,24 +116,15 @@ def process_login(driver, target_link):
                 sleep(3)
         except: pass
     
-    # 2. Navega para o jogo específico (Com lógica de nova tentativa)
+    # 2. Navega para o jogo específico
+    driver.get(target_link)
+    
     try:
-        driver.get(target_link)
-        # Timeout aumentado para 15s para garantir que a página carregue com lentidão.
         WebDriverWait(driver, 15).until(
             EC.presence_of_element_located((By.XPATH, '//iframe[contains(@src, "spribe") or contains(@src, "aviator")]'))
         )
-    except TimeoutException:
-        # Nova tentativa de navegação se o primeiro GET falhar/demorar
-        print(f"    -> Alerta: Timeout no primeiro GET. Tentando novamente...")
-        driver.get(target_link)
-        try:
-             WebDriverWait(driver, 15).until(
-                 EC.presence_of_element_located((By.XPATH, '//iframe[contains(@src, "spribe") or contains(@src, "aviator")]'))
-             )
-        except:
-            pass # Deixa o initialize_game_elements cuidar da falha.
-
+    except: pass
+        
     check_blocking_modals(driver)
     return True
 
@@ -157,8 +135,7 @@ def initialize_game_elements(driver):
     
     iframe = None
     try:
-        # Timeout aumentado de 10s para 15s
-        iframe = WebDriverWait(driver, 15).until(
+        iframe = WebDriverWait(driver, 10).until(
             EC.presence_of_element_located((By.XPATH, '//iframe[contains(@src, "spribe") or contains(@src, "aviator")]'))
         )
         driver.switch_to.frame(iframe)
@@ -167,8 +144,7 @@ def initialize_game_elements(driver):
 
     hist = None
     try:
-        # Timeout aumentado de 5s para 10s
-        hist = WebDriverWait(driver, 10).until(
+        hist = WebDriverWait(driver, 5).until(
             EC.presence_of_element_located((By.CSS_SELECTOR, ".payouts-block, app-stats-widget"))
         )
     except:
@@ -196,11 +172,11 @@ def run_single_bot(bot_config):
     
     relogin_date = date.today()
 
-    while True: 
+    while True: # Loop infinito de reconexão se cair
         driver = None
         try:
             print(f"🔄 [{nome}] Iniciando driver...")
-            driver = start_driver(nome) # Passa o nome
+            driver = start_driver()
             process_login(driver, link)
 
             iframe, hist = initialize_game_elements(driver)
@@ -211,14 +187,14 @@ def run_single_bot(bot_config):
             LAST_SENT = None
             ULTIMO_MULTIPLIER_TIME = time()
             
-            while True: 
+            while True: # Loop de leitura
                 # 1. Manutenção Diária (específica desta thread)
                 now_br = datetime.now(TZ_BR)
                 if now_br.hour == 0 and now_br.minute <= 5 and (relogin_date != now_br.date()):
                     print(f"🌙 [{nome}] Reinício diário...")
                     driver.quit()
                     relogin_date = now_br.date()
-                    break 
+                    break # Sai do loop de leitura para reiniciar driver
 
                 # 2. Check Inatividade
                 if (time() - ULTIMO_MULTIPLIER_TIME) > TEMPO_MAX_INATIVIDADE:
@@ -298,8 +274,7 @@ if __name__ == "__main__":
             t = threading.Thread(target=run_single_bot, args=(config,))
             t.start()
             threads.append(t)
-            # AUMENTO CRÍTICO: Espera de 10s para evitar sobrecarga de CPU na inicialização do 2º Chrome.
-            sleep(10) 
+            sleep(2) # Pequena pausa entre o início de cada um para não sobrecarregar CPU
 
         # Mantém script principal rodando
         for t in threads:
