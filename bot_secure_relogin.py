@@ -44,7 +44,6 @@ PASSWORD = os.getenv("PASSWORD")
 TZ_BR = pytz.timezone("America/Sao_Paulo")
 
 # Configurações Turbo
-# Mantenho em 0.1 para estabilidade. Veja explicação sobre "0 delay" abaixo.
 POLLING_INTERVAL = 0.1          
 TEMPO_MAX_INATIVIDADE = 360     
 
@@ -62,8 +61,8 @@ except Exception as e:
 # =============================================================
 # 🛠️ DRIVER E NAVEGAÇÃO
 # =============================================================
-# 💡 CORREÇÃO 1: Adicionando o nome do bot e logging robusto
-def start_driver(nome_bot): 
+# 💡 CORREÇÃO 1: Adicionando nome_bot para melhor logging na inicialização
+def start_driver(nome_bot):
     options = webdriver.ChromeOptions()
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
@@ -75,7 +74,6 @@ def start_driver(nome_bot):
     options.add_argument("--log-level=3")
     options.add_argument("--silent")
 
-    # Tenta a instalação automática (mais robusta)
     try:
         print(f"[{nome_bot}]    -> Tentando ChromeDriverManager...")
         return webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
@@ -126,14 +124,15 @@ def process_login(driver, target_link):
                 sleep(3)
         except: pass
     
-    # 2. Navega para o jogo específico
+    # 2. Navega para o jogo específico (Com lógica de nova tentativa)
     try:
         driver.get(target_link)
-        WebDriverWait(driver, 15).until( 
+        # 💡 CORREÇÃO 2: Aumento do timeout para 15s para tolerar lentidão no servidor
+        WebDriverWait(driver, 15).until(
             EC.presence_of_element_located((By.XPATH, '//iframe[contains(@src, "spribe") or contains(@src, "aviator")]'))
         )
     except TimeoutException:
-        # 💡 CORREÇÃO 2: Tenta novamente se o primeiro acesso for lento (tolerância à instabilidade de servidor)
+        # Tenta novamente se o primeiro acesso for lento
         print(f"    -> Alerta: Timeout no primeiro GET. Tentando novamente...")
         driver.get(target_link)
         try:
@@ -141,8 +140,8 @@ def process_login(driver, target_link):
                  EC.presence_of_element_located((By.XPATH, '//iframe[contains(@src, "spribe") or contains(@src, "aviator")]'))
              )
         except:
-            pass
-        
+            pass # Deixa o initialize_game_elements cuidar da falha
+
     check_blocking_modals(driver)
     return True
 
@@ -153,7 +152,7 @@ def initialize_game_elements(driver):
     
     iframe = None
     try:
-        # 💡 CORREÇÃO 3: Aumento de 10s para 15s para encontrar o iframe
+        # 💡 CORREÇÃO 3: Timeout aumentado de 10s para 15s
         iframe = WebDriverWait(driver, 15).until(
             EC.presence_of_element_located((By.XPATH, '//iframe[contains(@src, "spribe") or contains(@src, "aviator")]'))
         )
@@ -163,7 +162,7 @@ def initialize_game_elements(driver):
 
     hist = None
     try:
-        # 💡 CORREÇÃO 4: Aumento de 5s para 10s para encontrar o bloco de resultados
+        # 💡 CORREÇÃO 4: Timeout aumentado de 5s para 10s
         hist = WebDriverWait(driver, 10).until(
             EC.presence_of_element_located((By.CSS_SELECTOR, ".payouts-block, app-stats-widget"))
         )
@@ -202,8 +201,8 @@ def run_single_bot(bot_config):
 
             iframe, hist = initialize_game_elements(driver)
             if not hist: 
-                # Agora o erro "Elementos não encontrados" será lançado aqui
-                raise Exception("Elementos do jogo (iframe/historico) não encontrados após login.")
+                # Se falhar aqui, o erro é mais específico
+                raise Exception("Elementos não encontrados")
 
             print(f"🚀 [{nome}] MONITORANDO EM '{path_fb}'")
             
@@ -297,7 +296,8 @@ if __name__ == "__main__":
             t = threading.Thread(target=run_single_bot, args=(config,))
             t.start()
             threads.append(t)
-            # 💡 CORREÇÃO 6: Aumento Crítico do sleep de 2s para 10s para estabilidade máxima
+            # 💡 CORREÇÃO 6 (Instabilidade): Aumento CRÍTICO do sleep de 2s para 10s.
+            # Isso evita que a inicialização dos dois Chrome sobrecarregue o servidor.
             sleep(10) 
 
         # Mantém script principal rodando
