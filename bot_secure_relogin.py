@@ -3,7 +3,7 @@ from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
-# Removido ChromeDriverManager para máxima estabilidade em servidores
+# REMOVIDO webdriver_manager para evitar conflitos e timeouts
 from time import sleep, time
 from datetime import datetime, date
 from selenium.common.exceptions import StaleElementReferenceException, TimeoutException
@@ -12,7 +12,7 @@ from firebase_admin import credentials, db
 import os
 import pytz
 import logging
-import threading
+import threading  # <--- IMPORTANTE PARA RODAR OS 2 AO MESMO TEMPO
 
 # =============================================================
 # 🔥 GOATHBOT V6.0 - DUAL MODE (SERVER EDITION)
@@ -61,7 +61,7 @@ except Exception as e:
 # =============================================================
 # 🛠️ DRIVER E NAVEGAÇÃO
 # =============================================================
-# 💡 CORREÇÃO 1: Adição de flags de otimização de RAM (Memory Optimization)
+# 💡 CORREÇÃO 1: Otimização de RAM (Flags) e uso exclusivo do binário estático
 def start_driver(nome_bot):
     options = webdriver.ChromeOptions()
     options.add_argument("--no-sandbox")
@@ -74,7 +74,7 @@ def start_driver(nome_bot):
     options.add_argument("--log-level=3")
     options.add_argument("--silent")
     
-    # NOVAS FLAGS PARA REDUÇÃO DE CONSUMO DE RAM
+    # NOVAS FLAGS PARA REDUÇÃO DE CONSUMO DE RAM (CRÍTICO)
     options.add_argument("--disable-software-rasterizer")
     options.add_argument("--disable-background-networking")
     options.add_argument("--disable-default-apps")
@@ -103,7 +103,7 @@ def check_blocking_modals(driver):
         xpaths = [
             "//button[contains(., 'Sim')]", 
             "//button[@data-age-action='yes']", 
-            "//div[contains(text(), '18')]/following::button[1]",
+            "//div[contains(text(), '18')]/following::button[1]", 
             "//button[contains(., 'Aceitar')]"
         ]
         for xp in xpaths:
@@ -208,7 +208,7 @@ def run_single_bot(bot_config):
             
             LAST_SENT = None
             ULTIMO_MULTIPLIER_TIME = time()
-            POLLING_COUNT = 0 
+            POLLING_COUNT = 0 # Contador para forçar re-seleção
             
             while True: # Loop de leitura
                 # 1. Manutenção Diária
@@ -223,7 +223,7 @@ def run_single_bot(bot_config):
                 if (time() - ULTIMO_MULTIPLIER_TIME) > TEMPO_MAX_INATIVIDADE:
                     raise Exception("Inatividade detectada")
 
-                # 💡 CORREÇÃO 6: Força re-seleção do elemento a cada 5 segundos (evita Stale/Congelamento)
+                # 💡 CORREÇÃO 2: Força re-seleção do elemento a cada 5 segundos (evita Stale/Congelamento)
                 POLLING_COUNT += 1
                 if POLLING_COUNT > 50: 
                     print(f"[{nome}] Forçando re-seleção de elementos (Check de estabilidade)...")
@@ -308,7 +308,7 @@ if __name__ == "__main__":
             t = threading.Thread(target=run_single_bot, args=(config,))
             t.start()
             threads.append(t)
-            # 💡 CORREÇÃO 7: Aumento CRÍTICO para estabilidade (evita sobrecarga de CPU/RAM)
+            # 💡 CORREÇÃO 3: Pausa de 10s para evitar sobrecarga de CPU/RAM inicial
             sleep(10) 
 
         # Mantém script principal rodando
