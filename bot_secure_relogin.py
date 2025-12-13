@@ -44,7 +44,7 @@ PASSWORD = os.getenv("PASSWORD")
 TZ_BR = pytz.timezone("America/Sao_Paulo")
 
 # Configurações Turbo
-POLLING_INTERVAL = 0.5          # Aumentado para reduzir uso de CPU/RAM
+POLLING_INTERVAL = 0.1          
 TEMPO_MAX_INATIVIDADE = 360     
 
 # =============================================================
@@ -67,11 +67,7 @@ def start_driver():
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--headless=new") # Atualizado para nova flag headless
     options.add_argument("--disable-gpu")
-    options.add_argument("--window-size=1280,800")  # Reduzido para menos RAM
-    options.add_argument("--blink-settings=imagesEnabled=false")  # Desabilita imagens para menos RAM
-    options.add_argument("--disable-images")
-    options.add_argument("--disable-extensions")
-    options.add_argument("--disable-software-rasterizer")
+    options.add_argument("--window-size=1920,1080")
     options.page_load_strategy = 'eager'
     options.add_argument("--disable-popup-blocking")
     options.add_argument("--log-level=3")
@@ -149,7 +145,7 @@ def initialize_game_elements(driver):
     hist = None
     try:
         hist = WebDriverWait(driver, 5).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, ".payouts-block, app-stats-widget, .round-history"))  # Adicionado .round-history
+            EC.presence_of_element_located((By.CSS_SELECTOR, ".payouts-block, app-stats-widget"))
         )
     except:
         return None, None
@@ -215,7 +211,7 @@ def run_single_bot(bot_config):
                             if txt: resultados.append(float(txt))
                     except: pass
 
-                    # Fallback Texto Bruto do hist
+                    # Fallback Texto Bruto
                     if not resultados:
                         txt_full = hist.get_attribute("innerText").replace('x', '').replace('\n', ' ')
                         for val in txt_full.split():
@@ -223,25 +219,6 @@ def run_single_bot(bot_config):
                                 v = float(val)
                                 if v >= 1.0: resultados.append(v)
                             except: pass
-
-                    # Fallback adicional: Texto completo do body no frame
-                    if not resultados:
-                        try:
-                            body_text = driver.find_element(By.TAG_NAME, "body").get_attribute("innerText").replace('x', '').replace('\n', ' ')
-                            for val in body_text.split():
-                                try:
-                                    v = float(val)
-                                    if v >= 1.0: resultados.append(v)
-                                except: pass
-                            if resultados:
-                                print(f"[{nome}] Usando fallback body: {resultados}")
-                        except: pass
-
-                    # Log para depuração
-                    if resultados:
-                        print(f"[{nome}] Resultados encontrados: {resultados}")
-                    else:
-                        print(f"[{nome}] Nenhum resultado encontrado nesta iteração.")
 
                     # 4. Envio
                     if resultados:
