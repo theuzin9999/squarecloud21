@@ -3,7 +3,7 @@ from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
-from webdriver_manager.chrome import ChromeDriverManager
+# Removido ChromeDriverManager para evitar conflito de versão
 from time import sleep, time
 from datetime import datetime, date
 from selenium.common.exceptions import StaleElementReferenceException, TimeoutException
@@ -61,8 +61,8 @@ except Exception as e:
 # =============================================================
 # 🛠️ DRIVER E NAVEGAÇÃO
 # =============================================================
-# 💡 CORREÇÃO 1: Adicionando nome_bot para melhor logging
-def start_driver(nome_bot):
+# 💡 CORREÇÃO 1: Função start_driver otimizada para Square Cloud e logging
+def start_driver(nome_bot): # Adicionado nome_bot para logging
     options = webdriver.ChromeOptions()
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
@@ -74,18 +74,15 @@ def start_driver(nome_bot):
     options.add_argument("--log-level=3")
     options.add_argument("--silent")
 
+    # Tentativa direta de usar o binário do sistema (sem WDM, que estava causando o erro de versão)
     try:
-        print(f"[{nome_bot}]    -> Tentando ChromeDriverManager...")
-        return webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
-    except Exception as e_wdm:
-        print(f"[{nome_bot}]    -> Falha no ChromeDriverManager: {e_wdm}")
-        # Fallback para servidores Linux
-        try:
-            print(f"[{nome_bot}]    -> Tentando caminho estático /usr/bin/chromedriver...")
-            return webdriver.Chrome(service=Service("/usr/bin/chromedriver"), options=options)
-        except Exception as e_static:
-            print(f"[{nome_bot}]    -> Falha no caminho estático: {e_static}")
-            raise Exception(f"Falha CRÍTICA ao iniciar o WebDriver em AMBOS os métodos.")
+        print(f"[{nome_bot}]    -> Tentando binário do sistema (/usr/bin/chromedriver)...")
+        # Se a versão estiver correta no ambiente, essa linha resolve.
+        return webdriver.Chrome(service=Service("/usr/bin/chromedriver"), options=options)
+    except Exception as e:
+        # Se falhar, é o erro de versão que você viu.
+        print(f"[{nome_bot}]    -> Falha CRÍTICA ao usar binário do sistema. ERRO DE VERSÃO (Chrome: 142 vs Driver: 114): {e}")
+        raise Exception("Falha CRÍTICA: ChromeDriver desatualizado. Verifique as dependências APT do seu projeto.")
 
 
 def safe_click(driver, by, value, timeout=5):
@@ -128,12 +125,12 @@ def process_login(driver, target_link):
     # 2. Navega para o jogo específico (Com lógica de nova tentativa)
     try:
         driver.get(target_link)
-        # 💡 CORREÇÃO 2: Aumento do timeout para 15s para tolerar lentidão no servidor
+        # Timeout para 15s
         WebDriverWait(driver, 15).until(
             EC.presence_of_element_located((By.XPATH, '//iframe[contains(@src, "spribe") or contains(@src, "aviator")]'))
         )
     except TimeoutException:
-        # Tenta novamente se o primeiro acesso for lento
+        # 💡 CORREÇÃO 2: Tenta navegar novamente em caso de lentidão no servidor
         print(f"    -> Alerta: Timeout no primeiro GET. Tentando novamente...")
         driver.get(target_link)
         try:
@@ -141,8 +138,8 @@ def process_login(driver, target_link):
                  EC.presence_of_element_located((By.XPATH, '//iframe[contains(@src, "spribe") or contains(@src, "aviator")]'))
              )
         except:
-            pass # Deixa o initialize_game_elements cuidar da falha
-
+            pass
+        
     check_blocking_modals(driver)
     return True
 
@@ -153,7 +150,7 @@ def initialize_game_elements(driver):
     
     iframe = None
     try:
-        # 💡 CORREÇÃO 3: Timeout aumentado de 10s para 15s
+        # 💡 CORREÇÃO 3: Timeout iframe aumentado de 10s para 15s
         iframe = WebDriverWait(driver, 15).until(
             EC.presence_of_element_located((By.XPATH, '//iframe[contains(@src, "spribe") or contains(@src, "aviator")]'))
         )
@@ -163,7 +160,7 @@ def initialize_game_elements(driver):
 
     hist = None
     try:
-        # 💡 CORREÇÃO 4: Timeout aumentado de 5s para 10s
+        # 💡 CORREÇÃO 4: Timeout histórico aumentado de 5s para 10s
         hist = WebDriverWait(driver, 10).until(
             EC.presence_of_element_located((By.CSS_SELECTOR, ".payouts-block, app-stats-widget"))
         )
@@ -202,7 +199,6 @@ def run_single_bot(bot_config):
 
             iframe, hist = initialize_game_elements(driver)
             if not hist: 
-                # Se falhar aqui, o erro é mais específico e será capturado no except
                 raise Exception("Elementos do jogo (iframe/historico) não encontrados após login.")
 
             print(f"🚀 [{nome}] MONITORANDO EM '{path_fb}'")
@@ -217,7 +213,7 @@ def run_single_bot(bot_config):
                     print(f"🌙 [{nome}] Reinício diário...")
                     driver.quit()
                     relogin_date = now_br.date()
-                    break # Sai do loop de leitura para reiniciar driver
+                    break 
 
                 # 2. Check Inatividade
                 if (time() - ULTIMO_MULTIPLIER_TIME) > TEMPO_MAX_INATIVIDADE:
@@ -297,8 +293,7 @@ if __name__ == "__main__":
             t = threading.Thread(target=run_single_bot, args=(config,))
             t.start()
             threads.append(t)
-            # 💡 CORREÇÃO 6: Aumento CRÍTICO para estabilidade. 
-            # O sleep(2) estava causando a sobrecarga. Aumentar para 10s resolve.
+            # 💡 CORREÇÃO 6: Aumento CRÍTICO para estabilidade (evita sobrecarga de CPU)
             sleep(10) 
 
         # Mantém script principal rodando
