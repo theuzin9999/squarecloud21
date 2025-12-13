@@ -106,7 +106,7 @@ def verificar_modais_bloqueio(driver):
         except: pass
 
 # =============================================================
-# 🛠️ DRIVER E NAVEGAÇÃO (ALTERADO PARA FIREFOX/GECKODRIVER)
+# 🛠️ DRIVER E NAVEGAÇÃO (AJUSTE NO GECKODRIVER PATH)
 # =============================================================
 def initialize_driver_instance():
     # Tenta matar processos antigos para liberar memória
@@ -122,20 +122,33 @@ def initialize_driver_instance():
     # Configurações para Firefox
     options = webdriver.FirefoxOptions()
     options.page_load_strategy = 'eager'
-    options.add_argument("--headless") # Firefox usa --headless
+    options.add_argument("--headless")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-gpu")
     options.add_argument("--window-size=1920,1080")
     
-    # Configurar o Service para geckodriver (instalado via APT no square.json)
+    # NOVO: TENTA ENCONTRAR O DRIVER EM CAMINHOS COMUNS APÓS INSTALAÇÃO APT
+    driver_paths = ["/usr/bin/geckodriver", "/usr/local/bin/geckodriver", "geckodriver"]
+    gecko_path = None
+    
+    for path in driver_paths:
+        if os.path.exists(path) and os.access(path, os.X_OK):
+            gecko_path = path
+            break
+
     try:
-        # Tenta usar o geckodriver instalado no /usr/bin (padrão em ambientes Linux)
-        service = Service("/usr/bin/geckodriver")
-        return webdriver.Firefox(service=service, options=options)
+        if gecko_path:
+            print(f"✅ Geckodriver encontrado em: {gecko_path}")
+            service = Service(gecko_path)
+            return webdriver.Firefox(service=service, options=options)
+        else:
+            # Caso não encontre nos caminhos comuns, tenta a inicialização simples (rely on PATH)
+            print("⚠️ Geckodriver não encontrado em paths esperados. Tentando inicialização padrão...")
+            return webdriver.Firefox(options=options)
     except Exception as e:
-        print(f"⚠️ Aviso: Não encontrou geckodriver em /usr/bin. Tentando inicialização padrão. Erro: {e}")
-        # Tenta inicializar sem especificar o path (rely on PATH environment variable)
-        return webdriver.Firefox(options=options)
+        print(f"❌ ERRO CRÍTICO ao iniciar o Firefox/Geckodriver: {e}")
+        # Se a inicialização falhar aqui, não há como continuar
+        sys.exit()
 
 
 def setup_tabs_and_login(driver):
@@ -367,4 +380,4 @@ if __name__ == "__main__":
         except Exception as e:
             print(f"❌ Erro crítico no Supervisor: {e}")
             sleep(10)
-            
+        
