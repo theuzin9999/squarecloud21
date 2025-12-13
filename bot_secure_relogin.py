@@ -3,7 +3,10 @@ from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
-from webdriver_manager.chrome import ChromeDriverManager
+# =================================================================
+# ⚠️ MUDANÇA: Necessário para forçar a versão do ChromeDriver (142)
+from webdriver_manager.chrome import ChromeDriverManager 
+# =================================================================
 from time import sleep, time
 from datetime import datetime, date
 from selenium.common.exceptions import StaleElementReferenceException, TimeoutException
@@ -12,7 +15,7 @@ from firebase_admin import credentials, db
 import os
 import pytz
 import logging
-import threading  # <--- IMPORTANTE PARA RODAR OS 2 AO MESMO TEMPO
+import threading
 
 # =============================================================
 # 🔥 GOATHBOT V6.0 - DUAL MODE (SERVER EDITION)
@@ -65,7 +68,7 @@ def start_driver(nome_bot):
     options = webdriver.ChromeOptions()
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
-    options.add_argument("--headless=new") # Atualizado para nova flag headless
+    options.add_argument("--headless=new")
     options.add_argument("--disable-gpu")
     options.add_argument("--window-size=1920,1080")
     options.page_load_strategy = 'eager'
@@ -73,13 +76,15 @@ def start_driver(nome_bot):
     options.add_argument("--log-level=3")
     options.add_argument("--silent")
 
-    # Tenta a instalação automática (mais robusto)
+    # Tenta a instalação automática (mais robusto), FORÇANDO A VERSÃO 142
     try:
-        print(f"[{nome_bot}]    -> Tentando ChromeDriverManager...")
-        return webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
+        print(f"[{nome_bot}]    -> Tentando ChromeDriverManager (v142)...")
+        # Forçando o WDM a baixar o driver compatível com a v142.0.7444.59
+        driver_path = ChromeDriverManager(version="142.0.7444.59").install()
+        return webdriver.Chrome(service=Service(driver_path), options=options)
     except Exception as e_wdm:
         print(f"[{nome_bot}]    -> Falha no ChromeDriverManager: {e_wdm}")
-        # Fallback para servidores Linux (Render/Heroku/VPS)
+        # Fallback para servidores Linux
         try:
             print(f"[{nome_bot}]    -> Tentando caminho estático /usr/bin/chromedriver...")
             return webdriver.Chrome(service=Service("/usr/bin/chromedriver"), options=options)
@@ -128,7 +133,7 @@ def process_login(driver, target_link):
     # 2. Navega para o jogo específico e aguarda o iframe (TIMEOUT AUMENTADO)
     try:
         driver.get(target_link)
-        WebDriverWait(driver, 15).until( # Aumento de 15s
+        WebDriverWait(driver, 15).until( 
             EC.presence_of_element_located((By.XPATH, '//iframe[contains(@src, "spribe") or contains(@src, "aviator")]'))
         )
     except TimeoutException:
