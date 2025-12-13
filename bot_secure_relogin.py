@@ -12,7 +12,7 @@ from firebase_admin import credentials, db
 import os
 import pytz
 import logging
-import threading  # <--- IMPORTANTE PARA RODAR OS 2 AO MESMO TEMPO
+import threading  
 
 # =============================================================
 # 🔥 GOATHBOT V6.0 - DUAL MODE (SERVER EDITION)
@@ -44,6 +44,7 @@ PASSWORD = os.getenv("PASSWORD")
 TZ_BR = pytz.timezone("America/Sao_Paulo")
 
 # Configurações Turbo
+# Mantenho em 0.1 para estabilidade. Veja explicação sobre "0 delay" abaixo.
 POLLING_INTERVAL = 0.1          
 TEMPO_MAX_INATIVIDADE = 360     
 
@@ -61,11 +62,12 @@ except Exception as e:
 # =============================================================
 # 🛠️ DRIVER E NAVEGAÇÃO
 # =============================================================
-def start_driver():
+# 💡 CORREÇÃO 1: Adicionando o nome do bot e logging robusto
+def start_driver(nome_bot): 
     options = webdriver.ChromeOptions()
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
-    options.add_argument("--headless=new") # Atualizado para nova flag headless
+    options.add_argument("--headless=new") 
     options.add_argument("--disable-gpu")
     options.add_argument("--window-size=1920,1080")
     options.page_load_strategy = 'eager'
@@ -73,11 +75,19 @@ def start_driver():
     options.add_argument("--log-level=3")
     options.add_argument("--silent")
 
+    # Tenta a instalação automática (mais robusta)
     try:
+        print(f"[{nome_bot}]    -> Tentando ChromeDriverManager...")
         return webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
-    except:
-        # Fallback para servidores Linux (Render/Heroku/VPS)
-        return webdriver.Chrome(service=Service("/usr/bin/chromedriver"), options=options)
+    except Exception as e_wdm:
+        print(f"[{nome_bot}]    -> Falha no ChromeDriverManager: {e_wdm}")
+        # Fallback para servidores Linux
+        try:
+            print(f"[{nome_bot}]    -> Tentando caminho estático /usr/bin/chromedriver...")
+            return webdriver.Chrome(service=Service("/usr/bin/chromedriver"), options=options)
+        except Exception as e_static:
+            print(f"[{nome_bot}]    -> Falha no caminho estático: {e_static}")
+            raise Exception(f"Falha CRÍTICA ao iniciar o WebDriver em AMBOS os métodos.")
 
 def safe_click(driver, by, value, timeout=5):
     try:
@@ -117,13 +127,21 @@ def process_login(driver, target_link):
         except: pass
     
     # 2. Navega para o jogo específico
-    driver.get(target_link)
-    
     try:
-        WebDriverWait(driver, 15).until(
+        driver.get(target_link)
+        WebDriverWait(driver, 15).until( 
             EC.presence_of_element_located((By.XPATH, '//iframe[contains(@src, "spribe") or contains(@src, "aviator")]'))
         )
-    except: pass
+    except TimeoutException:
+        # 💡 CORREÇÃO 2: Tenta novamente se o primeiro acesso for lento (tolerância à instabilidade de servidor)
+        print(f"    -> Alerta: Timeout no primeiro GET. Tentando novamente...")
+        driver.get(target_link)
+        try:
+             WebDriverWait(driver, 15).until(
+                 EC.presence_of_element_located((By.XPATH, '//iframe[contains(@src, "spribe") or contains(@src, "aviator")]'))
+             )
+        except:
+            pass
         
     check_blocking_modals(driver)
     return True
@@ -135,7 +153,8 @@ def initialize_game_elements(driver):
     
     iframe = None
     try:
-        iframe = WebDriverWait(driver, 10).until(
+        # 💡 CORREÇÃO 3: Aumento de 10s para 15s para encontrar o iframe
+        iframe = WebDriverWait(driver, 15).until(
             EC.presence_of_element_located((By.XPATH, '//iframe[contains(@src, "spribe") or contains(@src, "aviator")]'))
         )
         driver.switch_to.frame(iframe)
@@ -144,7 +163,8 @@ def initialize_game_elements(driver):
 
     hist = None
     try:
-        hist = WebDriverWait(driver, 5).until(
+        # 💡 CORREÇÃO 4: Aumento de 5s para 10s para encontrar o bloco de resultados
+        hist = WebDriverWait(driver, 10).until(
             EC.presence_of_element_located((By.CSS_SELECTOR, ".payouts-block, app-stats-widget"))
         )
     except:
@@ -176,11 +196,14 @@ def run_single_bot(bot_config):
         driver = None
         try:
             print(f"🔄 [{nome}] Iniciando driver...")
-            driver = start_driver()
+            # 💡 CORREÇÃO 5: Passando o nome do bot para o start_driver
+            driver = start_driver(nome) 
             process_login(driver, link)
 
             iframe, hist = initialize_game_elements(driver)
-            if not hist: raise Exception("Elementos não encontrados")
+            if not hist: 
+                # Agora o erro "Elementos não encontrados" será lançado aqui
+                raise Exception("Elementos do jogo (iframe/historico) não encontrados após login.")
 
             print(f"🚀 [{nome}] MONITORANDO EM '{path_fb}'")
             
@@ -274,7 +297,8 @@ if __name__ == "__main__":
             t = threading.Thread(target=run_single_bot, args=(config,))
             t.start()
             threads.append(t)
-            sleep(2) # Pequena pausa entre o início de cada um para não sobrecarregar CPU
+            # 💡 CORREÇÃO 6: Aumento Crítico do sleep de 2s para 10s para estabilidade máxima
+            sleep(10) 
 
         # Mantém script principal rodando
         for t in threads:
