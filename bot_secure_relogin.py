@@ -3,7 +3,7 @@ from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
-# Removido ChromeDriverManager para evitar conflito de versão
+# Removido ChromeDriverManager para máxima estabilidade em servidores
 from time import sleep, time
 from datetime import datetime, date
 from selenium.common.exceptions import StaleElementReferenceException, TimeoutException
@@ -12,7 +12,7 @@ from firebase_admin import credentials, db
 import os
 import pytz
 import logging
-import threading  # <--- IMPORTANTE PARA RODAR OS 2 AO MESMO TEMPO
+import threading
 
 # =============================================================
 # 🔥 GOATHBOT V6.0 - DUAL MODE (SERVER EDITION)
@@ -61,8 +61,8 @@ except Exception as e:
 # =============================================================
 # 🛠️ DRIVER E NAVEGAÇÃO
 # =============================================================
-# 💡 CORREÇÃO 1: Função start_driver otimizada para Square Cloud e logging
-def start_driver(nome_bot): # Adicionado nome_bot para logging
+# 💡 CORREÇÃO 1: Adição de flags de otimização de RAM (Memory Optimization)
+def start_driver(nome_bot):
     options = webdriver.ChromeOptions()
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
@@ -73,16 +73,21 @@ def start_driver(nome_bot): # Adicionado nome_bot para logging
     options.add_argument("--disable-popup-blocking")
     options.add_argument("--log-level=3")
     options.add_argument("--silent")
+    
+    # NOVAS FLAGS PARA REDUÇÃO DE CONSUMO DE RAM
+    options.add_argument("--disable-software-rasterizer")
+    options.add_argument("--disable-background-networking")
+    options.add_argument("--disable-default-apps")
+    options.add_argument("--disable-extensions")
+    options.add_argument("--disable-sync")
 
-    # Tentativa direta de usar o binário do sistema (sem WDM, que estava causando o erro de versão)
+    # Tenta usar o binário do sistema (mais estável na Square Cloud)
     try:
         print(f"[{nome_bot}]    -> Tentando binário do sistema (/usr/bin/chromedriver)...")
-        # Se a versão estiver correta no ambiente, essa linha resolve.
         return webdriver.Chrome(service=Service("/usr/bin/chromedriver"), options=options)
     except Exception as e:
-        # Se falhar, é o erro de versão que você viu.
-        print(f"[{nome_bot}]    -> Falha CRÍTICA ao usar binário do sistema. ERRO DE VERSÃO (Chrome: 142 vs Driver: 114): {e}")
-        raise Exception("Falha CRÍTICA: ChromeDriver desatualizado. Verifique as dependências APT do seu projeto.")
+        print(f"[{nome_bot}]    -> Falha CRÍTICA ao iniciar o WebDriver: {e}")
+        raise Exception("Falha ao iniciar o WebDriver. Verifique as dependências APT.")
 
 
 def safe_click(driver, by, value, timeout=5):
@@ -130,7 +135,6 @@ def process_login(driver, target_link):
             EC.presence_of_element_located((By.XPATH, '//iframe[contains(@src, "spribe") or contains(@src, "aviator")]'))
         )
     except TimeoutException:
-        # 💡 CORREÇÃO 2: Tenta navegar novamente em caso de lentidão no servidor
         print(f"    -> Alerta: Timeout no primeiro GET. Tentando novamente...")
         driver.get(target_link)
         try:
@@ -150,7 +154,7 @@ def initialize_game_elements(driver):
     
     iframe = None
     try:
-        # 💡 CORREÇÃO 3: Timeout iframe aumentado de 10s para 15s
+        # Timeout iframe aumentado de 10s para 15s
         iframe = WebDriverWait(driver, 15).until(
             EC.presence_of_element_located((By.XPATH, '//iframe[contains(@src, "spribe") or contains(@src, "aviator")]'))
         )
@@ -160,7 +164,7 @@ def initialize_game_elements(driver):
 
     hist = None
     try:
-        # 💡 CORREÇÃO 4: Timeout histórico aumentado de 5s para 10s
+        # Timeout histórico aumentado de 5s para 10s
         hist = WebDriverWait(driver, 10).until(
             EC.presence_of_element_located((By.CSS_SELECTOR, ".payouts-block, app-stats-widget"))
         )
@@ -193,7 +197,6 @@ def run_single_bot(bot_config):
         driver = None
         try:
             print(f"🔄 [{nome}] Iniciando driver...")
-            # 💡 CORREÇÃO 5: Passando o nome do bot para o start_driver
             driver = start_driver(nome) 
             process_login(driver, link)
 
@@ -205,9 +208,10 @@ def run_single_bot(bot_config):
             
             LAST_SENT = None
             ULTIMO_MULTIPLIER_TIME = time()
+            POLLING_COUNT = 0 
             
             while True: # Loop de leitura
-                # 1. Manutenção Diária (específica desta thread)
+                # 1. Manutenção Diária
                 now_br = datetime.now(TZ_BR)
                 if now_br.hour == 0 and now_br.minute <= 5 and (relogin_date != now_br.date()):
                     print(f"🌙 [{nome}] Reinício diário...")
@@ -218,6 +222,17 @@ def run_single_bot(bot_config):
                 # 2. Check Inatividade
                 if (time() - ULTIMO_MULTIPLIER_TIME) > TEMPO_MAX_INATIVIDADE:
                     raise Exception("Inatividade detectada")
+
+                # 💡 CORREÇÃO 6: Força re-seleção do elemento a cada 5 segundos (evita Stale/Congelamento)
+                POLLING_COUNT += 1
+                if POLLING_COUNT > 50: 
+                    print(f"[{nome}] Forçando re-seleção de elementos (Check de estabilidade)...")
+                    driver.switch_to.default_content()
+                    iframe, hist = initialize_game_elements(driver)
+                    if not hist: 
+                        raise Exception("Elementos perdidos após check de estabilidade.")
+                    else:
+                        POLLING_COUNT = 0
 
                 # 3. Leitura
                 try:
@@ -293,7 +308,7 @@ if __name__ == "__main__":
             t = threading.Thread(target=run_single_bot, args=(config,))
             t.start()
             threads.append(t)
-            # 💡 CORREÇÃO 6: Aumento CRÍTICO para estabilidade (evita sobrecarga de CPU)
+            # 💡 CORREÇÃO 7: Aumento CRÍTICO para estabilidade (evita sobrecarga de CPU/RAM)
             sleep(10) 
 
         # Mantém script principal rodando
