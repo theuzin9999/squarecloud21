@@ -3,9 +3,9 @@ from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
-from webdriver_manager.chrome import ChromeDriverManager
 from selenium.common.exceptions import StaleElementReferenceException, TimeoutException
 
+from webdriver_manager.chrome import ChromeDriverManager
 from time import sleep, time
 from datetime import datetime, date
 import threading
@@ -16,7 +16,7 @@ import pytz
 import logging
 
 # =============================================================
-# 🔥 GOATHBOT V6.1 - STABLE DUAL MODE (SQUARE CLOUD FIX)
+# 🔥 GOATHBOT V6.2 - SQUARE CLOUD SAFE
 # =============================================================
 
 SERVICE_ACCOUNT_FILE = "serviceAccountKey.json"
@@ -57,7 +57,7 @@ if not firebase_admin._apps:
 print("✅ Conexão Firebase estabelecida.")
 
 # =============================================================
-# 🛠️ CHROME DRIVER OTIMIZADO
+# 🛠️ CHROME DRIVER (SQUARE CLOUD SAFE)
 # =============================================================
 def start_driver():
     options = webdriver.ChromeOptions()
@@ -67,13 +67,14 @@ def start_driver():
     options.add_argument("--disable-gpu")
     options.add_argument("--window-size=1920,1080")
 
-    # 🔥 FLAGS DE ESTABILIDADE
-    options.add_argument("--single-process")
+    # 🔥 FLAGS SEGURAS PARA CLOUD
     options.add_argument("--disable-extensions")
     options.add_argument("--disable-background-networking")
     options.add_argument("--disable-background-timer-throttling")
     options.add_argument("--memory-pressure-off")
     options.add_argument("--disable-software-rasterizer")
+    options.add_argument("--disable-features=VizDisplayCompositor")
+    options.add_argument("--js-flags=--max-old-space-size=128")
 
     options.page_load_strategy = "eager"
     options.add_argument("--log-level=3")
@@ -91,14 +92,14 @@ def start_driver():
         )
 
 # =============================================================
-# 🔐 LOGIN + NAVEGAÇÃO
+# 🔐 LOGIN
 # =============================================================
 def login_and_open(driver, link):
     driver.get(URL_DO_SITE)
     sleep(2)
 
     try:
-        WebDriverWait(driver, 5).until(
+        WebDriverWait(driver, 6).until(
             EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Entrar')]"))
         ).click()
         sleep(1)
@@ -119,7 +120,7 @@ def login_and_open(driver, link):
 def load_game_elements(driver):
     driver.switch_to.default_content()
 
-    iframe = WebDriverWait(driver, 15).until(
+    iframe = WebDriverWait(driver, 20).until(
         EC.presence_of_element_located(
             (By.XPATH, "//iframe[contains(@src,'spribe') or contains(@src,'aviator')]")
         )
@@ -127,7 +128,7 @@ def load_game_elements(driver):
 
     driver.switch_to.frame(iframe)
 
-    hist = WebDriverWait(driver, 10).until(
+    hist = WebDriverWait(driver, 15).until(
         EC.presence_of_element_located(
             (By.CSS_SELECTOR, ".payouts-block, app-stats-widget")
         )
@@ -150,7 +151,6 @@ def run_bot(cfg):
     nome = cfg["nome"]
     link = cfg["link"]
     path = cfg["firebase_path"]
-
     relogin_date = date.today()
 
     while True:
@@ -158,9 +158,10 @@ def run_bot(cfg):
         try:
             print(f"🔄 [{nome}] Iniciando driver...")
             driver = start_driver()
-            login_and_open(driver, link)
 
+            login_and_open(driver, link)
             hist = load_game_elements(driver)
+
             print(f"🚀 [{nome}] MONITORANDO EM '{path}'")
 
             last_sent = None
@@ -169,13 +170,16 @@ def run_bot(cfg):
             while True:
                 now = datetime.now(TZ_BR)
 
+                # Reinício diário
                 if now.hour == 0 and now.minute < 5 and now.date() != relogin_date:
                     relogin_date = now.date()
                     raise Exception("Reinicio diário")
 
+                # Inatividade
                 if time() - last_time > TEMPO_MAX_INATIVIDADE:
                     raise Exception("Inatividade")
 
+                # Elemento morto
                 if not hist.is_displayed():
                     raise Exception("Elemento invisível")
 
@@ -186,8 +190,8 @@ def run_bot(cfg):
                         txt = it.text.replace("x", "").strip()
                         if txt:
                             values.append(float(txt))
-                except:
-                    pass
+                except (StaleElementReferenceException, TimeoutException):
+                    raise Exception("DOM reiniciado")
 
                 if values:
                     v = values[0]
@@ -223,11 +227,11 @@ def run_bot(cfg):
 # =============================================================
 if __name__ == "__main__":
     if not EMAIL or not PASSWORD:
-        print("❗ Configure EMAIL e PASSWORD.")
+        print("❗ Configure EMAIL e PASSWORD nas variáveis de ambiente.")
         exit()
 
     print("==============================================")
-    print("   GOATHBOT V6.1 - STABLE DUAL MONITORING")
+    print("   GOATHBOT V6.2 - STABLE DUAL MONITORING")
     print("==============================================")
 
     for cfg in CONFIG_BOTS:
