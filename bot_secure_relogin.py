@@ -12,7 +12,7 @@ from firebase_admin import credentials, db
 import os
 import pytz
 import logging
-import threading  
+import threading  # <--- IMPORTANTE PARA RODAR OS 2 AO MESMO TEMPO
 
 # =============================================================
 # 🔥 GOATHBOT V6.0 - DUAL MODE (SERVER EDITION)
@@ -61,7 +61,7 @@ except Exception as e:
 # =============================================================
 # 🛠️ DRIVER E NAVEGAÇÃO
 # =============================================================
-# 💡 CORREÇÃO 1: Adicionando nome_bot para melhor logging na inicialização
+# 💡 CORREÇÃO 1: Adicionando nome_bot para melhor logging
 def start_driver(nome_bot):
     options = webdriver.ChromeOptions()
     options.add_argument("--no-sandbox")
@@ -86,6 +86,7 @@ def start_driver(nome_bot):
         except Exception as e_static:
             print(f"[{nome_bot}]    -> Falha no caminho estático: {e_static}")
             raise Exception(f"Falha CRÍTICA ao iniciar o WebDriver em AMBOS os métodos.")
+
 
 def safe_click(driver, by, value, timeout=5):
     try:
@@ -201,8 +202,8 @@ def run_single_bot(bot_config):
 
             iframe, hist = initialize_game_elements(driver)
             if not hist: 
-                # Se falhar aqui, o erro é mais específico
-                raise Exception("Elementos não encontrados")
+                # Se falhar aqui, o erro é mais específico e será capturado no except
+                raise Exception("Elementos do jogo (iframe/historico) não encontrados após login.")
 
             print(f"🚀 [{nome}] MONITORANDO EM '{path_fb}'")
             
@@ -296,8 +297,8 @@ if __name__ == "__main__":
             t = threading.Thread(target=run_single_bot, args=(config,))
             t.start()
             threads.append(t)
-            # 💡 CORREÇÃO 6 (Instabilidade): Aumento CRÍTICO do sleep de 2s para 10s.
-            # Isso evita que a inicialização dos dois Chrome sobrecarregue o servidor.
+            # 💡 CORREÇÃO 6: Aumento CRÍTICO para estabilidade. 
+            # O sleep(2) estava causando a sobrecarga. Aumentar para 10s resolve.
             sleep(10) 
 
         # Mantém script principal rodando
