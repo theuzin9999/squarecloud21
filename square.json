@@ -1,9 +1,10 @@
 {
   "name": "...",
   "version": "...",
-  "start": "python3 bot_secure_relogin.py",
+  "start": "python3 bot_secure_relogin2aviato - Copia.py", 
   "type": "python",
   "web": true,
+  "memoria_ram_mb": 3072,  <-- INCLUSÃO / AJUSTE AQUI
   "apt": [
     "chromium",
     "chromium-chromedriver"
