@@ -3,7 +3,7 @@ from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
-# REMOVIDO webdriver_manager para evitar conflitos e timeouts
+# REMOVIDO webdriver_manager.chrome.ChromeDriverManager
 from time import sleep, time
 from datetime import datetime, date
 from selenium.common.exceptions import StaleElementReferenceException, TimeoutException
@@ -36,7 +36,7 @@ CONFIG_BOTS = [
 ]
 
 # Configuração Limpa de Logs
-logging.getLogger('WDM').setLevel(logging.ERROR)
+logging.getLogger('WDM').setLevel(logging.CRITICAL) # OTIMIZADO: Nível CRITICAL
 os.environ['WDM_LOG_LEVEL'] = '0'
 
 EMAIL = os.getenv("EMAIL")
@@ -61,8 +61,8 @@ except Exception as e:
 # =============================================================
 # 🛠️ DRIVER E NAVEGAÇÃO
 # =============================================================
-# 💡 CORREÇÃO 1: Otimização de RAM (Flags) e uso exclusivo do binário estático
-def start_driver(nome_bot):
+# 💡 CORREÇÃO: Otimização de RAM (Flags) e uso exclusivo do binário estático
+def start_driver(nome_bot): # Recebe nome_bot para logging
     options = webdriver.ChromeOptions()
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
@@ -74,16 +74,19 @@ def start_driver(nome_bot):
     options.add_argument("--log-level=3")
     options.add_argument("--silent")
     
-    # NOVAS FLAGS PARA REDUÇÃO DE CONSUMO DE RAM (CRÍTICO)
+    # NOVAS FLAGS PARA REDUÇÃO EXTREMA DE CONSUMO DE RAM (CRÍTICO)
     options.add_argument("--disable-software-rasterizer")
     options.add_argument("--disable-background-networking")
     options.add_argument("--disable-default-apps")
     options.add_argument("--disable-extensions")
     options.add_argument("--disable-sync")
+    options.add_argument("--disk-cache-size=1") # Quase zero cache
+    options.add_argument("--media-cache-size=1") # Quase zero cache de mídia
 
-    # Tenta usar o binário do sistema (mais estável na Square Cloud)
+    # Tenta usar o binário do sistema (única forma estável na Square Cloud)
     try:
         print(f"[{nome_bot}]    -> Tentando binário do sistema (/usr/bin/chromedriver)...")
+        # APENAS USO ESTÁTICO DO BINÁRIO
         return webdriver.Chrome(service=Service("/usr/bin/chromedriver"), options=options)
     except Exception as e:
         print(f"[{nome_bot}]    -> Falha CRÍTICA ao iniciar o WebDriver: {e}")
@@ -197,6 +200,7 @@ def run_single_bot(bot_config):
         driver = None
         try:
             print(f"🔄 [{nome}] Iniciando driver...")
+            # IMPORTANTE: Chamada de start_driver corrigida para passar o nome
             driver = start_driver(nome) 
             process_login(driver, link)
 
@@ -223,7 +227,7 @@ def run_single_bot(bot_config):
                 if (time() - ULTIMO_MULTIPLIER_TIME) > TEMPO_MAX_INATIVIDADE:
                     raise Exception("Inatividade detectada")
 
-                # 💡 CORREÇÃO 2: Força re-seleção do elemento a cada 5 segundos (evita Stale/Congelamento)
+                # 💡 CORREÇÃO: Força re-seleção do elemento a cada 5 segundos (evita Stale/Congelamento)
                 POLLING_COUNT += 1
                 if POLLING_COUNT > 50: 
                     print(f"[{nome}] Forçando re-seleção de elementos (Check de estabilidade)...")
@@ -308,7 +312,7 @@ if __name__ == "__main__":
             t = threading.Thread(target=run_single_bot, args=(config,))
             t.start()
             threads.append(t)
-            # 💡 CORREÇÃO 3: Pausa de 10s para evitar sobrecarga de CPU/RAM inicial
+            # 💡 CORREÇÃO: Pausa aumentada para 10s para evitar pico de RAM/CPU na inicialização
             sleep(10) 
 
         # Mantém script principal rodando
