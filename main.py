@@ -1,299 +1,266 @@
-from __future__ import annotations
-
 import os
-import sys
 import logging
 import threading
-import signal
-from dataclasses import dataclass
+import pytz
 from time import sleep, time
 from datetime import datetime, date
-from typing import Optional, Tuple, List
-
-import pytz
-import firebase_admin
-from firebase_admin import credentials, db
-
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
+# REMOVIDO: from webdriver_manager.chrome import ChromeDriverManager
 from selenium.common.exceptions import StaleElementReferenceException, TimeoutException, WebDriverException
+import firebase_admin
+from firebase_admin import credentials, db
 
-from webdriver_manager.chrome import ChromeDriverManager
+# =============================================================
+# 🔥 GOATHBOT V6.0 - SERVER EDITION (SQUARE CLOUD FIX)
+# =============================================================
 
+# CONFIGURAÇÕES
+SERVICE_ACCOUNT_FILE = 'serviceAccountKey.json'
+DATABASE_URL = 'https://history-dashboard-a70ee-default-rtdb.firebaseio.com'
+URL_DO_SITE = "https://www.goathbet.com"
+TZ_BR = pytz.timezone("America/Sao_Paulo")
 
-SERVICE_ACCOUNT_FILE = os.getenv("SERVICE_ACCOUNT_FILE", "serviceAccountKey.json")
-DATABASE_URL = os.getenv("DATABASE_URL", "https://history-dashboard-a70ee-default-rtdb.firebaseio.com")
-URL_DO_SITE = os.getenv("URL_DO_SITE", "https://www.goathbet.com")
-
+# Variáveis de Ambiente (Configure na Square Cloud)
 EMAIL = os.getenv("EMAIL")
 PASSWORD = os.getenv("PASSWORD")
 
-TZ_BR = pytz.timezone(os.getenv("TZ", "America/Sao_Paulo"))
-
-POLLING_INTERVAL = float(os.getenv("POLLING_INTERVAL", "0.12"))
-TEMPO_MAX_INATIVIDADE = int(os.getenv("TEMPO_MAX_INATIVIDADE", "360"))
-DAILY_RESTART_WINDOW_MIN = int(os.getenv("DAILY_RESTART_WINDOW_MIN", "7"))
-FLOAT_EPS = float(os.getenv("FLOAT_EPS", "0.0001"))
-
-HEADLESS = os.getenv("HEADLESS", "1").strip() != "0"
-CHROMEDRIVER_PATH = os.getenv("CHROMEDRIVER_PATH")
-
-logging.getLogger("WDM").setLevel(logging.ERROR)
-os.environ["WDM_LOG_LEVEL"] = "0"
-
-LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper().strip()
-logging.basicConfig(
-    level=getattr(logging, LOG_LEVEL, logging.INFO),
-    format="%(asctime)s | %(levelname)s | %(message)s",
-    datefmt="%H:%M:%S",
-)
-log = logging.getLogger("goathbot")
-
+# CONFIGURAÇÃO DOS BOTS
 CONFIG_BOTS = [
     {
-        "nome": "ORIGINAL",
+        "nome": "AVIATOR_1",
         "link": "https://www.goathbet.com/pt/casino/spribe/aviator",
-        "firebase_path": "history",
+        "firebase_path": "history"
     },
     {
-        "nome": "AVIATOR 2",
+        "nome": "AVIATOR_2",
         "link": "https://www.goathbet.com/pt/casino/spribe/aviator-2",
-        "firebase_path": "aviator2",
-    },
+        "firebase_path": "aviator2"
+    }
 ]
 
-STOP_EVENT = threading.Event()
+# Configuração de Logs
+logging.getLogger('WDM').setLevel(logging.ERROR)
+os.environ['WDM_LOG_LEVEL'] = '0'
 
-
-def _handle_signal(sig, frame):
-    STOP_EVENT.set()
-    log.warning("Encerrando por sinal %s", sig)
-
-
-signal.signal(signal.SIGINT, _handle_signal)
-signal.signal(signal.SIGTERM, _handle_signal)
-
-
-def init_firebase() -> None:
+# =============================================================
+# 🔧 FIREBASE INIT
+# =============================================================
+def init_firebase():
     if not firebase_admin._apps:
-        cred = credentials.Certificate(SERVICE_ACCOUNT_FILE)
-        firebase_admin.initialize_app(cred, {"databaseURL": DATABASE_URL})
+        try:
+            if not os.path.exists(SERVICE_ACCOUNT_FILE):
+                print(f"❌ Erro: Arquivo {SERVICE_ACCOUNT_FILE} não encontrado!")
+                exit(1)
+            cred = credentials.Certificate(SERVICE_ACCOUNT_FILE)
+            firebase_admin.initialize_app(cred, {'databaseURL': DATABASE_URL})
+            print("✅ Firebase Conectado.")
+        except Exception as e:
+            print(f"❌ Erro Crítico Firebase: {e}")
+            exit(1)
 
+# =============================================================
+# 🛠️ DRIVER OTIMIZADO PARA SERVIDORES (LINUX FIX)
+# =============================================================
+def start_driver():
+    chrome_options = Options()
+    
+    # Flags vitais para rodar no Linux/Docker da Square Cloud
+    chrome_options.add_argument("--headless=new") 
+    chrome_options.add_argument("--no-sandbox")
+    chrome_options.add_argument("--disable-dev-shm-usage") # Reduz uso de RAM
+    chrome_options.add_argument("--disable-gpu")
+    chrome_options.add_argument("--window-size=1366,768")
+    chrome_options.add_argument("--disable-extensions")
+    chrome_options.add_argument("--disable-infobars")
+    chrome_options.add_argument("--mute-audio")
+    chrome_options.page_load_strategy = 'eager'
 
-def start_driver() -> webdriver.Chrome:
-    options = webdriver.ChromeOptions()
-    options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
-    if HEADLESS:
-        options.add_argument("--headless=new")
-        options.add_argument("--disable-gpu")
-    options.add_argument("--window-size=1920,1080")
-    options.page_load_strategy = "eager"
-    options.add_argument("--disable-popup-blocking")
-    options.add_argument("--log-level=3")
-    options.add_argument("--silent")
-
-    if CHROMEDRIVER_PATH and os.path.exists(CHROMEDRIVER_PATH):
-        return webdriver.Chrome(service=Service(CHROMEDRIVER_PATH), options=options)
-
+    # SOLUÇÃO CRÍTICA PARA O ERRO DE VERSÃO:
+    chrome_options.binary_location = "/usr/bin/chromium"
+    
     try:
-        return webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
-    except Exception:
-        return webdriver.Chrome(service=Service("/usr/bin/chromedriver"), options=options)
-
+        # Usa o ChromeDriver compatível que está no PATH do servidor
+        service = Service("/usr/bin/chromedriver")
+        return webdriver.Chrome(service=service, options=chrome_options)
+    except Exception as e:
+        print(f"⚠️ Erro Crítico ao Iniciar Driver: {e}")
+        return None
 
 def safe_click(driver, by, value, timeout=5):
     try:
-        el = WebDriverWait(driver, timeout).until(EC.element_to_be_clickable((by, value)))
-        driver.execute_script("arguments[0].click();", el)
+        element = WebDriverWait(driver, timeout).until(EC.element_to_be_clickable((by, value)))
+        driver.execute_script("arguments[0].click();", element)
         return True
-    except Exception:
-        return False
-
+    except: return False
 
 def check_blocking_modals(driver):
-    xpaths = [
-        "//button[contains(., 'Sim')]",
-        "//button[@data-age-action='yes']",
-        "//button[contains(., 'Aceitar')]",
-        "//button[contains(., 'Entendi')]",
-        "//button[contains(., 'OK')]",
-    ]
-    for xp in xpaths:
-        if safe_click(driver, By.XPATH, xp, timeout=1):
-            break
-
-
-def wait_for_iframe(driver, timeout=15):
-    return WebDriverWait(driver, timeout).until(
-        EC.presence_of_element_located(
-            (By.XPATH, '//iframe[contains(@src, "spribe") or contains(@src, "aviator")]')
-        )
-    )
-
-
-def wait_for_history_element(driver, timeout=8):
-    return WebDriverWait(driver, timeout).until(
-        EC.presence_of_element_located((By.CSS_SELECTOR, ".payouts-block, app-stats-widget"))
-    )
-
+    try:
+        popups = [
+            "//button[contains(., 'Sim')]", 
+            "//button[contains(., 'Aceitar')]",
+            "//div[@role='dialog']//button"
+        ]
+        for xp in popups:
+            if safe_click(driver, By.XPATH, xp, 1): break
+    except: pass
 
 def process_login(driver, target_link):
-    driver.get(URL_DO_SITE)
-    sleep(2)
-    check_blocking_modals(driver)
-
-    safe_click(driver, By.XPATH, "//button[contains(., 'Entrar')]", 6)
-
+    print("🔑 Iniciando Login...")
     try:
-        email_el = WebDriverWait(driver, 8).until(EC.presence_of_element_located((By.NAME, "email")))
-        pass_el = driver.find_element(By.NAME, "password")
-        email_el.clear()
-        pass_el.clear()
-        email_el.send_keys(EMAIL or "")
-        pass_el.send_keys(PASSWORD or "")
-        safe_click(driver, By.CSS_SELECTOR, "button[type='submit']", 6)
-        sleep(3)
-    except Exception:
-        pass
+        driver.get(URL_DO_SITE)
+        sleep(2)
+        check_blocking_modals(driver)
+        
+        if safe_click(driver, By.XPATH, "//button[contains(text(), 'Entrar')]", 5) or \
+           safe_click(driver, By.CSS_SELECTOR, "a[href*='login']", 5):
+            sleep(1)
+            driver.find_element(By.NAME, "email").send_keys(EMAIL)
+            driver.find_element(By.NAME, "password").send_keys(PASSWORD)
+            safe_click(driver, By.CSS_SELECTOR, "button[type='submit']", 5)
+            sleep(3)
+    except Exception as e:
+        print(f"⚠️ Aviso Login: {e}")
 
+    print(f"🎮 Navegando: {target_link}")
     driver.get(target_link)
-    sleep(3)
-    check_blocking_modals(driver)
+    
+    try:
+        WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.TAG_NAME, 'iframe')))
+        return True
+    except:
+        return False
 
+def get_game_elements(driver):
+    try:
+        driver.switch_to.default_content()
+        iframe = WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.XPATH, '//iframe[contains(@src, "spribe") or contains(@src, "aviator")]'))
+        )
+        driver.switch_to.frame(iframe)
+        hist = WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, ".payouts-block, app-stats-widget"))
+        )
+        return hist
+    except:
+        return None
 
-def initialize_game_elements(driver):
-    driver.switch_to.default_content()
-    iframe = wait_for_iframe(driver, 12)
-    driver.switch_to.frame(iframe)
-    hist = wait_for_history_element(driver, 10)
-    return iframe, hist
-
-
-def get_color_class(m):
-    if 1.0 <= m < 2.0:
-        return "blue-bg"
-    if 2.0 <= m < 10.0:
-        return "purple-bg"
-    if m >= 10.0:
-        return "magenta-bg"
+def get_color_class(value):
+    try:
+        m = float(value)
+        if 1.0 <= m < 2.0: return "blue-bg"
+        if 2.0 <= m < 10.0: return "purple-bg"
+        if m >= 10.0: return "magenta-bg"
+    except: pass
     return "default-bg"
 
-
-def floats_equal(a, b):
-    return abs(a - b) <= FLOAT_EPS
-
-
-def parse_multipliers(hist):
-    results = []
-    try:
-        items = hist.find_elements(By.CSS_SELECTOR, ".payout, .bubble-multiplier")
-        for it in items:
-            txt = (it.text or "").replace("x", "").strip()
-            try:
-                v = float(txt)
-                if v >= 1:
-                    results.append(v)
-            except Exception:
-                pass
-    except Exception:
-        pass
-
-    if not results:
-        try:
-            txt = hist.text.replace("x", " ").replace("\n", " ")
-            for t in txt.split():
-                try:
-                    v = float(t)
-                    if v >= 1:
-                        results.append(v)
-                except Exception:
-                    pass
-        except Exception:
-            pass
-
-    return results
-
-
-@dataclass
-class BotConfig:
-    nome: str
-    link: str
-    firebase_path: str
-
-
-def run_single_bot(cfg: BotConfig):
-    relogin_date = date.today()
-
-    while not STOP_EVENT.is_set():
+# =============================================================
+# 🤖 LOOP DA THREAD (BOT INDIVIDUAL)
+# =============================================================
+def run_bot_thread(config):
+    nome = config['nome']
+    link = config['link']
+    path_fb = config['firebase_path']
+    
+    while True: # Ciclo de vida do Driver (Para recuperação de erros)
         driver = None
         try:
+            print(f"🔄 [{nome}] Iniciando...")
             driver = start_driver()
-            process_login(driver, cfg.link)
-            _, hist = initialize_game_elements(driver)
+            if not driver: 
+                sleep(10)
+                continue
 
-            last_sent = None
-            last_seen = time()
+            process_login(driver, link)
+            hist_element = get_game_elements(driver)
+            
+            if not hist_element:
+                print(f"⚠️ [{nome}] Falha no carregamento. Tentando novamente...")
+                if driver: driver.quit()
+                continue
 
-            while not STOP_EVENT.is_set():
+            print(f"✅ [{nome}] Monitorando Ativo.")
+            
+            last_value = None
+            inactivity_timer = time()
+
+            while True: # Ciclo de Leitura
+                # ⏰ REINÍCIO 23:59 (PARA LIMPEZA DE RAM/CACHE)
                 now = datetime.now(TZ_BR)
-
-                if now.hour == 0 and now.minute <= DAILY_RESTART_WINDOW_MIN and relogin_date != now.date():
-                    relogin_date = now.date()
+                if now.hour == 23 and now.minute == 59:
+                    print(f"🌙 [{nome}] Reinício Diário (23:59)...")
                     driver.quit()
+                    sleep(65) # Garante que o minuto 59 passe
+                    break 
+
+                # Inatividade (5 min)
+                if (time() - inactivity_timer) > 300:
+                    print(f"⚠️ [{nome}] Inatividade. Reiniciando...")
                     break
 
-                if time() - last_seen > TEMPO_MAX_INATIVIDADE:
-                    raise RuntimeError("Inatividade")
-
                 try:
-                    res = parse_multipliers(hist)
-                    if res:
-                        m = res[0]
-                        if last_sent is None or not floats_equal(m, last_sent):
-                            last_seen = time()
+                    text_data = hist_element.get_attribute("innerText").replace('x', '').replace('\n', ' ')
+                    multipliers = []
+                    for val in text_data.split():
+                        try:
+                            v = float(val)
+                            if v >= 1.0: multipliers.append(v)
+                        except: pass
+
+                    if multipliers:
+                        newest = multipliers[0]
+                        if newest != last_value:
+                            inactivity_timer = time()
+                            last_value = newest
+                            
+                            now_save = datetime.now(TZ_BR)
+                            key = now_save.strftime("%Y-%m-%d_%H-%M-%S-%f").replace('.', '-')
                             data = {
-                                "multiplier": f"{m:.2f}",
-                                "time": now.strftime("%H:%M:%S"),
-                                "date": now.strftime("%Y-%m-%d"),
-                                "color": get_color_class(m),
+                                "multiplier": f"{newest:.2f}",
+                                "time": now_save.strftime("%H:%M:%S"),
+                                "color": get_color_class(newest),
+                                "date": now_save.strftime("%Y-%m-%d")
                             }
-                            key = now.strftime("%Y-%m-%d_%H-%M-%S-%f") + "_" + cfg.nome.replace(" ", "_")
-                            db.reference(f"{cfg.firebase_path}/{key}").set(data)
-                            last_sent = m
-                    sleep(POLLING_INTERVAL)
-                except (StaleElementReferenceException, TimeoutException):
-                    _, hist = initialize_game_elements(driver)
+                            db.reference(f"{path_fb}/{key}").set(data)
+                            print(f"🔥 [{nome}] {data['multiplier']}x")
 
-        except Exception:
+                    sleep(1)
+
+                except (StaleElementReferenceException, WebDriverException):
+                    hist_element = get_game_elements(driver)
+                    if not hist_element: break # Se perder o elemento, reinicia o driver
+
+        except Exception as e:
+            print(f"❌ [{nome}] Erro: {e}")
+            sleep(5)
+        
+        finally:
             if driver:
-                driver.quit()
-            sleep(3)
+                try: driver.quit()
+                except: pass
+            sleep(5)
 
-
-def main():
-    if not EMAIL or not PASSWORD:
-        return 1
-
-    init_firebase()
-
-    threads = []
-    for b in CONFIG_BOTS:
-        t = threading.Thread(
-            target=run_single_bot,
-            args=(BotConfig(**b),),
-            daemon=True,
-        )
-        t.start()
-        threads.append(t)
-        sleep(1)
-
-    while not STOP_EVENT.is_set():
-        sleep(1)
-
-
+# =============================================================
+# 🚀 EXECUÇÃO PRINCIPAL
+# =============================================================
 if __name__ == "__main__":
-    sys.exit(main())
+    if not EMAIL or not PASSWORD:
+        print("⛔ Configure EMAIL e PASSWORD nas Variáveis de Ambiente da Square!")
+    else:
+        init_firebase()
+        threads = []
+        print(f"🚀 Iniciando {len(CONFIG_BOTS)} Bots com 3GB RAM otimizado...")
+        
+        for cfg in CONFIG_BOTS:
+            t = threading.Thread(target=run_bot_thread, args=(cfg,))
+            t.start()
+            threads.append(t)
+            sleep(5)
+            
+        for t in threads:
+            t.join()
+               
