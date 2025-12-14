@@ -15,7 +15,7 @@ import firebase_admin
 from firebase_admin import credentials, db
 
 # =============================================================
-# 🔥 GOATHBOT V6.0 - SERVER EDITION (FIX DE ESTABILIDADE)
+# 🔥 GOATHBOT V6.0 - SERVER EDITION (FIX DE LEITURA AVIATOR 2)
 # =============================================================
 
 # CONFIGURAÇÕES
@@ -71,7 +71,7 @@ def start_driver():
     # Flags vitais para rodar no Linux/Docker da Square Cloud
     chrome_options.add_argument("--headless=new") 
     chrome_options.add_argument("--no-sandbox")
-    chrome_options.add_argument("--disable-dev-shm-usage") # Reduz uso de RAM
+    chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("--disable-gpu")
     chrome_options.add_argument("--window-size=1366,768")
     chrome_options.add_argument("--disable-extensions")
@@ -79,8 +79,8 @@ def start_driver():
     chrome_options.add_argument("--mute-audio")
     chrome_options.page_load_strategy = 'eager'
 
-    # NOVO FIX CRÍTICO para o BUG de 3GB: Limita a memória interna e threads
-    chrome_options.add_argument("--js-flags=--max-old-space-size=1024") # Limita a RAM V8 para 1GB por processo
+    # FIX CRÍTICO para o BUG de 3GB: Limita a memória interna e threads
+    chrome_options.add_argument("--js-flags=--max-old-space-size=1024")
     chrome_options.add_argument("--disable-features=RendererCodeIntegrity")
 
     # FIX DE VERSÃO: Usa os binários instalados no servidor
@@ -140,12 +140,10 @@ def process_login(driver, target_link):
 def get_game_elements(driver):
     try:
         driver.switch_to.default_content()
-        # Procura o iframe (Aviator)
-        iframe = WebDriverWait(driver, 15).until( # Aumentei o timeout para 15s para ser mais tolerante ao travamento
+        iframe = WebDriverWait(driver, 15).until(
             EC.presence_of_element_located((By.XPATH, '//iframe[contains(@src, "spribe") or contains(@src, "aviator")]'))
         )
         driver.switch_to.frame(iframe)
-        # Procura o histórico dentro do iframe
         hist = WebDriverWait(driver, 10).until(
             EC.presence_of_element_located((By.CSS_SELECTOR, ".payouts-block, app-stats-widget"))
         )
@@ -170,7 +168,7 @@ def run_bot_thread(config):
     link = config['link']
     path_fb = config['firebase_path']
     
-    while True: # Ciclo de vida do Driver (Para recuperação de erros)
+    while True:
         driver = None
         try:
             print(f"🔄 [{nome}] Iniciando...")
@@ -192,7 +190,7 @@ def run_bot_thread(config):
             last_value = None
             inactivity_timer = time()
 
-            while True: # Ciclo de Leitura
+            while True:
                 # ⏰ REINÍCIO 23:59 (PARA LIMPEZA DE RAM/CACHE)
                 now = datetime.now(TZ_BR)
                 if now.hour == 23 and now.minute == 59:
@@ -201,14 +199,16 @@ def run_bot_thread(config):
                     sleep(65)
                     break 
 
-                # Inatividade (5 min)
-                if (time() - inactivity_timer) > 300:
-                    print(f"⚠️ [{nome}] Inatividade. Reiniciando...")
+                # ⚠️ FIX AVIATOR 2: Reduzido para 1 minuto para forçar reconexão rápida
+                if (time() - inactivity_timer) > 60:
+                    print(f"⚠️ [{nome}] Inatividade/Falha Silenciosa de leitura. Reiniciando...")
                     break
 
                 try:
-                    text_data = hist_element.get_attribute("innerText").replace('x', '').replace('\n', ' ')
+                    # ✅ FIX AVIATOR 2: Usa .text em vez de innerText para leitura mais limpa
+                    text_data = hist_element.text.replace('x', '').replace('\n', ' ')
                     multipliers = []
+                    
                     for val in text_data.split():
                         try:
                             v = float(val)
@@ -218,7 +218,7 @@ def run_bot_thread(config):
                     if multipliers:
                         newest = multipliers[0]
                         if newest != last_value:
-                            inactivity_timer = time()
+                            inactivity_timer = time() # Reseta o timer SÓ SE achar novo valor
                             last_value = newest
                             
                             now_save = datetime.now(TZ_BR)
@@ -267,3 +267,4 @@ if __name__ == "__main__":
             
         for t in threads:
             t.join()
+        
