@@ -3,5 +3,5 @@ DESCRIPTION=Monitoramento Aviator Dual Mode
 MAIN=main.py
 MEMORY=3072
 VERSION=recommended
-START=sh -c 'tr -d "\r" < main.py | python'  <--- NOVO COMANDO DE LIMPEZA
+START=exec python main.py
 AUTORESTART=true
