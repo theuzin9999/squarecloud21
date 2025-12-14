@@ -3,5 +3,5 @@ DESCRIPTION=Monitoramento Aviator Dual Mode
 MAIN=main.py
 MEMORY=3072
 VERSION=recommended
-START=python main.py
+START=sh -c "python main.py"
 AUTORESTART=true
