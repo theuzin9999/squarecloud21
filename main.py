@@ -10,13 +10,13 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
-from webdriver_manager.chrome import ChromeDriverManager
+# REMOVIDO: from webdriver_manager.chrome import ChromeDriverManager
 from selenium.common.exceptions import StaleElementReferenceException, TimeoutException, WebDriverException
 import firebase_admin
 from firebase_admin import credentials, db
 
 # =============================================================
-# 🔥 GOATHBOT V6.0 - SERVER EDITION (SQUARE CLOUD)
+# 🔥 GOATHBOT V6.0 - SERVER EDITION (SQUARE CLOUD FIX)
 # =============================================================
 
 # CONFIGURAÇÕES
@@ -64,10 +64,11 @@ def init_firebase():
             exit(1)
 
 # =============================================================
-# 🛠️ DRIVER OPTIMIZADO
+# 🛠️ DRIVER OTIMIZADO PARA SERVIDORES (LINUX FIX)
 # =============================================================
 def start_driver():
     chrome_options = Options()
+    
     # Flags vitais para rodar no Linux/Docker da Square Cloud
     chrome_options.add_argument("--headless=new") 
     chrome_options.add_argument("--no-sandbox")
@@ -78,12 +79,16 @@ def start_driver():
     chrome_options.add_argument("--disable-infobars")
     chrome_options.add_argument("--mute-audio")
     chrome_options.page_load_strategy = 'eager'
+
+    # SOLUÇÃO CRÍTICA: FORÇA O USO DOS BINÁRIOS INSTALADOS NO SERVIDOR
+    chrome_options.binary_location = "/usr/bin/chromium"
     
     try:
-        service = Service(ChromeDriverManager().install())
+        # Usa o caminho padrão onde o ChromeDriver compatível está instalado no servidor.
+        service = Service("/usr/bin/chromedriver")
         return webdriver.Chrome(service=service, options=chrome_options)
     except Exception as e:
-        print(f"⚠️ Erro ao iniciar driver: {e}")
+        print(f"⚠️ Erro Crítico ao Iniciar Driver: {e}")
         return None
 
 def safe_click(driver, by, value, timeout=5):
@@ -189,7 +194,7 @@ def run_bot_thread(config):
                 if now.hour == 23 and now.minute == 59:
                     print(f"🌙 [{nome}] Reinício Diário (23:59)...")
                     driver.quit()
-                    sleep(65) # Espera virar o dia para não entrar em loop
+                    sleep(65)
                     break 
 
                 # Inatividade (5 min)
