@@ -2,6 +2,7 @@ import os
 import logging
 import threading
 import pytz
+import gc
 from time import sleep, time
 from datetime import datetime, date
 from selenium import webdriver
@@ -15,7 +16,7 @@ import firebase_admin
 from firebase_admin import credentials, db
 
 # =============================================================
-# 🔥 GOATHBOT V6.0 - SERVER EDITION (FIX DE LEITURA AVIATOR 2)
+# 🔥 GOATHBOT V6.1 - SERVER EDITION (FIX FINAL DE LEITURA)
 # =============================================================
 
 # CONFIGURAÇÕES
@@ -63,7 +64,7 @@ def init_firebase():
             exit(1)
 
 # =============================================================
-# 🛠️ DRIVER OTIMIZADO PARA SERVIDORES (FIX DE ALOCAÇÃO DE RAM)
+# 🛠️ DRIVER OTIMIZADO PARA SERVIDORES
 # =============================================================
 def start_driver():
     chrome_options = Options()
@@ -79,7 +80,7 @@ def start_driver():
     chrome_options.add_argument("--mute-audio")
     chrome_options.page_load_strategy = 'eager'
 
-    # FIX CRÍTICO para o BUG de 3GB: Limita a memória interna e threads
+    # FIX CRÍTICO: Limita a memória interna e threads
     chrome_options.add_argument("--js-flags=--max-old-space-size=1024")
     chrome_options.add_argument("--disable-features=RendererCodeIntegrity")
 
@@ -196,56 +197,63 @@ def run_bot_thread(config):
                 if now.hour == 23 and now.minute == 59:
                     print(f"🌙 [{nome}] Reinício Diário (23:59)...")
                     driver.quit()
+                    gc.collect() # Limpeza extra de memória
                     sleep(65)
                     break 
 
-                # ⚠️ FIX AVIATOR 2: Reduzido para 1 minuto para forçar reconexão rápida
-                if (time() - inactivity_timer) > 60:
-                    print(f"⚠️ [{nome}] Inatividade/Falha Silenciosa de leitura. Reiniciando...")
+                # ⚠️ FIX: Aumentado para 180s (3 min) para aguentar velas altas ou lags
+                if (time() - inactivity_timer) > 180:
+                    print(f"⚠️ [{nome}] Sem dados novos há 3min. Reiniciando Driver...")
                     break
 
                 try:
-                    # ✅ FIX AVIATOR 2: Usa .text em vez de innerText para leitura mais limpa
-                    text_data = hist_element.text.replace('x', '').replace('\n', ' ')
-                    multipliers = []
+                    # ✅ FIX: Usa JavaScript para extrair texto (fura o cache do Selenium)
+                    # Isso resolve o problema de o bot "ver" o elemento mas achar que o texto é antigo
+                    text_data = driver.execute_script("return arguments[0].innerText;", hist_element)
                     
-                    for val in text_data.split():
-                        try:
-                            v = float(val)
-                            if v >= 1.0: multipliers.append(v)
-                        except: pass
+                    if text_data:
+                        text_data = text_data.replace('x', '').replace('\n', ' ')
+                        multipliers = []
+                        
+                        for val in text_data.split():
+                            try:
+                                v = float(val)
+                                if v >= 1.0: multipliers.append(v)
+                            except: pass
 
-                    if multipliers:
-                        newest = multipliers[0]
-                        if newest != last_value:
-                            inactivity_timer = time() # Reseta o timer SÓ SE achar novo valor
-                            last_value = newest
-                            
-                            now_save = datetime.now(TZ_BR)
-                            key = now_save.strftime("%Y-%m-%d_%H-%M-%S-%f").replace('.', '-')
-                            data = {
-                                "multiplier": f"{newest:.2f}",
-                                "time": now_save.strftime("%H:%M:%S"),
-                                "color": get_color_class(newest),
-                                "date": now_save.strftime("%Y-%m-%d")
-                            }
-                            db.reference(f"{path_fb}/{key}").set(data)
-                            print(f"🔥 [{nome}] {data['multiplier']}x")
+                        if multipliers:
+                            newest = multipliers[0]
+                            if newest != last_value:
+                                inactivity_timer = time() # Reseta o timer
+                                last_value = newest
+                                
+                                now_save = datetime.now(TZ_BR)
+                                key = now_save.strftime("%Y-%m-%d_%H-%M-%S-%f").replace('.', '-')
+                                data = {
+                                    "multiplier": f"{newest:.2f}",
+                                    "time": now_save.strftime("%H:%M:%S"),
+                                    "color": get_color_class(newest),
+                                    "date": now_save.strftime("%Y-%m-%d")
+                                }
+                                db.reference(f"{path_fb}/{key}").set(data)
+                                print(f"🔥 [{nome}] {data['multiplier']}x")
 
                     sleep(1)
 
                 except (StaleElementReferenceException, WebDriverException):
+                    # Se der erro, tenta pegar o elemento de novo sem reiniciar tudo
                     hist_element = get_game_elements(driver)
                     if not hist_element: break
 
         except Exception as e:
-            print(f"❌ [{nome}] Erro: {e}")
+            print(f"❌ [{nome}] Erro Geral: {e}")
             sleep(5)
         
         finally:
             if driver:
                 try: driver.quit()
                 except: pass
+            gc.collect()
             sleep(5)
 
 # =============================================================
@@ -267,4 +275,4 @@ if __name__ == "__main__":
             
         for t in threads:
             t.join()
-        
+    
