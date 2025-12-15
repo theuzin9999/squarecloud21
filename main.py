@@ -16,7 +16,7 @@ import firebase_admin
 from firebase_admin import credentials, db
 
 # =============================================================
-# 🔥 GOATHBOT V6.1 - SERVER EDITION (FIX FINAL DE LEITURA)
+# 🔥 GOATHBOT V6.2 - SERVER EDITION (STAGGERED START + HEALTH CHECK)
 # =============================================================
 
 # CONFIGURAÇÕES
@@ -25,7 +25,7 @@ DATABASE_URL = 'https://history-dashboard-a70ee-default-rtdb.firebaseio.com'
 URL_DO_SITE = "https://www.goathbet.com"
 TZ_BR = pytz.timezone("America/Sao_Paulo")
 
-# Variáveis de Ambiente (Configure na Square Cloud)
+# Variáveis de Ambiente
 EMAIL = os.getenv("EMAIL")
 PASSWORD = os.getenv("PASSWORD")
 
@@ -64,12 +64,11 @@ def init_firebase():
             exit(1)
 
 # =============================================================
-# 🛠️ DRIVER OTIMIZADO PARA SERVIDORES
+# 🛠️ DRIVER OTIMIZADO
 # =============================================================
 def start_driver():
     chrome_options = Options()
     
-    # Flags vitais para rodar no Linux/Docker da Square Cloud
     chrome_options.add_argument("--headless=new") 
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
@@ -80,11 +79,11 @@ def start_driver():
     chrome_options.add_argument("--mute-audio")
     chrome_options.page_load_strategy = 'eager'
 
-    # FIX CRÍTICO: Limita a memória interna e threads
+    # Otimizações de Memória
     chrome_options.add_argument("--js-flags=--max-old-space-size=1024")
     chrome_options.add_argument("--disable-features=RendererCodeIntegrity")
 
-    # FIX DE VERSÃO: Usa os binários instalados no servidor
+    # Caminho Fixo Square Cloud
     chrome_options.binary_location = "/usr/bin/chromium"
     
     try:
@@ -133,7 +132,7 @@ def process_login(driver, target_link):
     driver.get(target_link)
     
     try:
-        WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.TAG_NAME, 'iframe')))
+        WebDriverWait(driver, 25).until(EC.presence_of_element_located((By.TAG_NAME, 'iframe')))
         return True
     except:
         return False
@@ -141,11 +140,11 @@ def process_login(driver, target_link):
 def get_game_elements(driver):
     try:
         driver.switch_to.default_content()
-        iframe = WebDriverWait(driver, 15).until(
+        iframe = WebDriverWait(driver, 20).until(
             EC.presence_of_element_located((By.XPATH, '//iframe[contains(@src, "spribe") or contains(@src, "aviator")]'))
         )
         driver.switch_to.frame(iframe)
-        hist = WebDriverWait(driver, 10).until(
+        hist = WebDriverWait(driver, 15).until(
             EC.presence_of_element_located((By.CSS_SELECTOR, ".payouts-block, app-stats-widget"))
         )
         return hist
@@ -182,33 +181,51 @@ def run_bot_thread(config):
             hist_element = get_game_elements(driver)
             
             if not hist_element:
-                print(f"⚠️ [{nome}] Falha ao encontrar o histórico. Reiniciando...")
+                print(f"⚠️ [{nome}] Falha ao encontrar histórico. Reiniciando...")
                 if driver: driver.quit()
                 continue
 
-            print(f"✅ [{nome}] Monitorando Ativo.")
+            # 🏥 HEALTH CHECK: Verifica se o jogo carregou DE VERDADE antes de monitorar
+            # Isso evita ficar 3 minutos parado em uma tela em branco ("Monitorando Ativo" falso)
+            print(f"🏥 [{nome}] Verificando saúde do carregamento...")
+            try:
+                check_ok = False
+                for _ in range(5): # Tenta ler por 10 segundos
+                    pre_text = driver.execute_script("return arguments[0].innerText;", hist_element)
+                    if pre_text and any(char.isdigit() for char in pre_text):
+                        check_ok = True
+                        break
+                    sleep(2)
+                
+                if not check_ok:
+                    raise Exception("Carregamento Fantasma (Elemento vazio)")
+            except Exception as e:
+                print(f"⚠️ [{nome}] Falha no Health Check: {e}. Reiniciando IMEDIATAMENTE...")
+                if driver: driver.quit()
+                continue # Reinicia o loop sem esperar 3 minutos
+
+            print(f"✅ [{nome}] Monitorando Ativo e Validado.")
             
             last_value = None
             inactivity_timer = time()
 
             while True:
-                # ⏰ REINÍCIO 23:59 (PARA LIMPEZA DE RAM/CACHE)
+                # ⏰ REINÍCIO 23:59
                 now = datetime.now(TZ_BR)
                 if now.hour == 23 and now.minute == 59:
                     print(f"🌙 [{nome}] Reinício Diário (23:59)...")
                     driver.quit()
-                    gc.collect() # Limpeza extra de memória
+                    gc.collect()
                     sleep(65)
                     break 
 
-                # ⚠️ FIX: Aumentado para 180s (3 min) para aguentar velas altas ou lags
+                # ⚠️ Timeout de 180s (3 min) para tolerar velas altas
                 if (time() - inactivity_timer) > 180:
                     print(f"⚠️ [{nome}] Sem dados novos há 3min. Reiniciando Driver...")
                     break
 
                 try:
-                    # ✅ FIX: Usa JavaScript para extrair texto (fura o cache do Selenium)
-                    # Isso resolve o problema de o bot "ver" o elemento mas achar que o texto é antigo
+                    # Leitura via JS para furar cache
                     text_data = driver.execute_script("return arguments[0].innerText;", hist_element)
                     
                     if text_data:
@@ -224,7 +241,7 @@ def run_bot_thread(config):
                         if multipliers:
                             newest = multipliers[0]
                             if newest != last_value:
-                                inactivity_timer = time() # Reseta o timer
+                                inactivity_timer = time()
                                 last_value = newest
                                 
                                 now_save = datetime.now(TZ_BR)
@@ -241,7 +258,6 @@ def run_bot_thread(config):
                     sleep(1)
 
                 except (StaleElementReferenceException, WebDriverException):
-                    # Se der erro, tenta pegar o elemento de novo sem reiniciar tudo
                     hist_element = get_game_elements(driver)
                     if not hist_element: break
 
@@ -261,18 +277,22 @@ def run_bot_thread(config):
 # =============================================================
 if __name__ == "__main__":
     if not EMAIL or not PASSWORD:
-        print("⛔ Configure EMAIL e PASSWORD nas Variáveis de Ambiente da Square!")
+        print("⛔ Configure EMAIL e PASSWORD nas Variáveis de Ambiente!")
     else:
         init_firebase()
         threads = []
-        print(f"🚀 Iniciando {len(CONFIG_BOTS)} Bots com 3GB RAM otimizado...")
+        print(f"🚀 Iniciando {len(CONFIG_BOTS)} Bots com LARGADA ESCALONADA...")
         
-        for cfg in CONFIG_BOTS:
+        for i, cfg in enumerate(CONFIG_BOTS):
             t = threading.Thread(target=run_bot_thread, args=(cfg,))
             t.start()
             threads.append(t)
-            sleep(5)
+            
+            # 🛑 STAGGERED START: Espera 40s entre o início de cada bot
+            # Isso evita que os dois tentem abrir o Chrome ao mesmo tempo e travem a CPU
+            if i < len(CONFIG_BOTS) - 1:
+                print(f"⏳ Aguardando 40s para iniciar o próximo bot...")
+                sleep(40)
             
         for t in threads:
             t.join()
-    
