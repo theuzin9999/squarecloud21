@@ -16,7 +16,7 @@ import firebase_admin
 from firebase_admin import credentials, db
 
 # =============================================================
-# 🔥 GOATHBOT V6.2 - SERVER EDITION (STAGGERED START + HEALTH CHECK)
+# 🔥 GOATHBOT V6.3 - SERVER EDITION (FIX VELAS REPETIDAS)
 # =============================================================
 
 # CONFIGURAÇÕES
@@ -161,7 +161,7 @@ def get_color_class(value):
     return "default-bg"
 
 # =============================================================
-# 🤖 LOOP DA THREAD (BOT INDIVIDUAL)
+# 🤖 LOOP DA THREAD (BOT INDIVIDUAL) - CORRIGIDO
 # =============================================================
 def run_bot_thread(config):
     nome = config['nome']
@@ -185,12 +185,11 @@ def run_bot_thread(config):
                 if driver: driver.quit()
                 continue
 
-            # 🏥 HEALTH CHECK: Verifica se o jogo carregou DE VERDADE antes de monitorar
-            # Isso evita ficar 3 minutos parado em uma tela em branco ("Monitorando Ativo" falso)
+            # 🏥 HEALTH CHECK: Verifica se o jogo carregou DE VERDADE
             print(f"🏥 [{nome}] Verificando saúde do carregamento...")
             try:
                 check_ok = False
-                for _ in range(5): # Tenta ler por 10 segundos
+                for _ in range(5): 
                     pre_text = driver.execute_script("return arguments[0].innerText;", hist_element)
                     if pre_text and any(char.isdigit() for char in pre_text):
                         check_ok = True
@@ -202,11 +201,12 @@ def run_bot_thread(config):
             except Exception as e:
                 print(f"⚠️ [{nome}] Falha no Health Check: {e}. Reiniciando IMEDIATAMENTE...")
                 if driver: driver.quit()
-                continue # Reinicia o loop sem esperar 3 minutos
+                continue 
 
             print(f"✅ [{nome}] Monitorando Ativo e Validado.")
             
-            last_value = None
+            # 🔥 CORREÇÃO: Usamos 'last_signature' (lista) ao invés de 'last_value' (único valor)
+            last_signature = [] 
             inactivity_timer = time()
 
             while True:
@@ -219,13 +219,13 @@ def run_bot_thread(config):
                     sleep(65)
                     break 
 
-                # ⚠️ Timeout de 180s (3 min) para tolerar velas altas
+                # ⚠️ Timeout de 180s
                 if (time() - inactivity_timer) > 180:
                     print(f"⚠️ [{nome}] Sem dados novos há 3min. Reiniciando Driver...")
                     break
 
                 try:
-                    # Leitura via JS para furar cache
+                    # Leitura via JS
                     text_data = driver.execute_script("return arguments[0].innerText;", hist_element)
                     
                     if text_data:
@@ -239,10 +239,15 @@ def run_bot_thread(config):
                             except: pass
 
                         if multipliers:
-                            newest = multipliers[0]
-                            if newest != last_value:
+                            # 📸 Tira uma 'foto' dos 5 primeiros resultados
+                            current_signature = multipliers[:5]
+                            
+                            # Compara a FOTO da lista, e não apenas o último número
+                            if current_signature != last_signature:
                                 inactivity_timer = time()
-                                last_value = newest
+                                last_signature = current_signature # Atualiza a assinatura
+                                
+                                newest = multipliers[0] # Pega o mais recente
                                 
                                 now_save = datetime.now(TZ_BR)
                                 key = now_save.strftime("%Y-%m-%d_%H-%M-%S-%f").replace('.', '-')
@@ -288,8 +293,7 @@ if __name__ == "__main__":
             t.start()
             threads.append(t)
             
-            # 🛑 STAGGERED START: Espera 40s entre o início de cada bot
-            # Isso evita que os dois tentem abrir o Chrome ao mesmo tempo e travem a CPU
+            # 🛑 STAGGERED START
             if i < len(CONFIG_BOTS) - 1:
                 print(f"⏳ Aguardando 40s para iniciar o próximo bot...")
                 sleep(40)
