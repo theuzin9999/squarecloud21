@@ -16,7 +16,7 @@ import firebase_admin
 from firebase_admin import credentials, db
 
 # =============================================================
-# 🔥 GOATHBOT V6.4 - SERVER EDITION (UPDATE SELETORES)
+# 🔥 GOATHBOT V6.5 - SERVER EDITION (FIX PAYOUTS-WRAPPER)
 # =============================================================
 
 # CONFIGURAÇÕES
@@ -92,7 +92,7 @@ def start_driver():
     chrome_options.add_argument("--js-flags=--max-old-space-size=1024")
     chrome_options.add_argument("--disable-features=RendererCodeIntegrity")
 
-    # Caminho Fixo Square Cloud (ajuste se necessário para seu ambiente)
+    # Caminho Fixo Square Cloud
     chrome_options.binary_location = "/usr/bin/chromium"
     
     try:
@@ -141,23 +141,25 @@ def process_login(driver, target_link):
     driver.get(target_link)
     
     try:
-        # Aumentei o timeout para garantir carregamento em redes lentas
         WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.TAG_NAME, 'iframe')))
         return True
     except:
         return False
 
+# =============================================================
+# 🔍 FUNÇÃO DE BUSCA OTIMIZADA (CORRIGIDA)
+# =============================================================
 def get_game_elements(driver):
     try:
         driver.switch_to.default_content()
         
-        # 1. Busca o IFRAME (Antigo "spribe/aviator" E Novo "game-iframe")
-        # O contains(@src, 'launch.spribegaming') cobre a nova URL fornecida
+        # 1. Busca o IFRAME
+        # Adicionei a verificação explícita da classe 'game-iframe' que você achou
         xpath_iframe = (
-            "//iframe[contains(@src, 'spribe') or "
-            "contains(@src, 'aviator') or "
-            "contains(@src, 'launch.spribegaming') or "
-            "contains(@class, 'game-iframe')]"
+            "//iframe[contains(@class, 'game-iframe') or "  # Prioridade 1 (Novo)
+            "contains(@src, 'launch.spribegaming') or "     # Prioridade 2 (Novo)
+            "contains(@src, 'spribe') or "                  # Fallback Antigo
+            "contains(@src, 'aviator')]"                    # Fallback Genérico
         )
         
         iframe = WebDriverWait(driver, 25).until(
@@ -165,20 +167,32 @@ def get_game_elements(driver):
         )
         driver.switch_to.frame(iframe)
         
-        # 2. Busca o HISTÓRICO (Antigo "app-stats-widget" E Novo ".payouts-block")
-        # Adicionei .payouts-block e .payout para garantir compatibilidade com a atualização
-        css_selectors = ".payouts-block, app-stats-widget, .payout, div[appcoloredmultiplier]"
+        # 2. Busca o HISTÓRICO
+        # Adicionei .payouts-wrapper (o pai) e .payout (o filho)
+        css_selectors = (
+            ".payouts-wrapper, "      # O container principal que você achou
+            ".payouts-block, "        # O container interno
+            ".payout, "               # O item individual
+            "app-stats-widget"        # O antigo (backup)
+        )
         
         hist = WebDriverWait(driver, 20).until(
             EC.presence_of_element_located((By.CSS_SELECTOR, css_selectors))
         )
         
-        # Se encontrou um item individual (.payout) em vez do bloco, tenta subir para o pai
-        # para pegar todos os resultados, senão pega o próprio elemento
+        # LÓGICA INTELIGENTE:
+        # Se achou apenas um item pequeno (.payout), pega o pai dele para ter a lista toda.
+        # Se achou o wrapper, usa ele mesmo.
         try:
             class_name = hist.get_attribute("class")
-            if "payout" in class_name and "block" not in class_name:
-                return hist.find_element(By.XPATH, "./..") # Retorna o pai (container)
+            if "payout" in class_name and "wrapper" not in class_name and "block" not in class_name:
+                # Se achou só o item '1.09x', sobe dois níveis para pegar o container
+                return hist.find_element(By.XPATH, "./../..") 
+            
+            if "payouts-block" in class_name:
+                 # Se achou o block, sobe um para o wrapper (garantia)
+                return hist.find_element(By.XPATH, "./..")
+                
         except:
             pass
 
@@ -199,9 +213,7 @@ def get_color_class(value):
 # 🤖 LOOP DA THREAD (BOT INDIVIDUAL)
 # =============================================================
 def run_bot_thread(config):
-    # Proteção caso o config venha como string (comentado)
-    if isinstance(config, str):
-        return
+    if isinstance(config, str): return
 
     nome = config['nome']
     link = config['link']
@@ -220,26 +232,26 @@ def run_bot_thread(config):
             hist_element = get_game_elements(driver)
             
             if not hist_element:
-                print(f"⚠️ [{nome}] Falha ao encontrar histórico (Novo ou Antigo). Reiniciando...")
+                print(f"⚠️ [{nome}] Falha ao encontrar histórico. Verifique se o jogo está em manutenção.")
                 if driver: driver.quit()
                 continue
 
             # 🏥 HEALTH CHECK
-            print(f"🏥 [{nome}] Verificando saúde do carregamento...")
+            print(f"🏥 [{nome}] Validando leitura dos dados...")
             try:
                 check_ok = False
                 for _ in range(5): 
                     pre_text = driver.execute_script("return arguments[0].innerText;", hist_element)
-                    # Verifica se tem pelo menos um dígito no texto extraído
-                    if pre_text and any(char.isdigit() for char in pre_text):
+                    # Verifica se tem números e o 'x' característico
+                    if pre_text and ("x" in pre_text or any(char.isdigit() for char in pre_text)):
                         check_ok = True
                         break
                     sleep(2)
                 
                 if not check_ok:
-                    raise Exception("Carregamento Fantasma (Elemento vazio)")
+                    raise Exception("Elemento encontrado mas sem dados (vazio)")
             except Exception as e:
-                print(f"⚠️ [{nome}] Falha no Health Check: {e}. Reiniciando...")
+                print(f"⚠️ [{nome}] Falha na Validação: {e}. Reiniciando...")
                 if driver: driver.quit()
                 continue 
 
@@ -264,8 +276,7 @@ def run_bot_thread(config):
                     break
 
                 try:
-                    # Leitura via JS - Funciona tanto para o layout novo quanto antigo
-                    # pois ambos contém texto dentro do container principal
+                    # Leitura via JS
                     text_data = driver.execute_script("return arguments[0].innerText;", hist_element)
                     
                     if text_data:
@@ -279,7 +290,6 @@ def run_bot_thread(config):
                             except: pass
 
                         if multipliers:
-                            # 📸 Tira uma 'foto' dos 5 primeiros resultados
                             current_signature = multipliers[:5]
                             
                             if current_signature != last_signature:
@@ -326,7 +336,6 @@ if __name__ == "__main__":
         init_firebase()
         threads = []
         
-        # Filtra apenas configurações ativas (ignora as strings de comentário)
         active_bots = [b for b in CONFIG_BOTS if isinstance(b, dict)]
         
         print(f"🚀 Iniciando {len(active_bots)} Bots com LARGADA ESCALONADA...")
@@ -336,7 +345,6 @@ if __name__ == "__main__":
             t.start()
             threads.append(t)
             
-            # 🛑 STAGGERED START
             if i < len(active_bots) - 1:
                 print(f"⏳ Aguardando 40s para iniciar o próximo bot...")
                 sleep(40)
