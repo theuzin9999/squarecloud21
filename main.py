@@ -17,7 +17,7 @@ import firebase_admin
 from firebase_admin import credentials, db
 
 # =============================================================
-# 🔥 GOATHBOT V7.1 - SINGLE/DUAL MODE
+# 🔥 GOATHBOT V7.2 - FIX VELAS ALTAS
 # =============================================================
 
 # CONFIGURAÇÕES GERAIS
@@ -255,11 +255,19 @@ def run_bot_thread(config):
                         raw = None
                     
                     if raw:
-                        clean = raw.strip().lower().replace('x', '')
+                        # -----------------------------------------------------------
+                        # 🔥 CORREÇÃO AQUI: Remove vírgulas para velas > 1000x
+                        # Ex: "1,540.20x" vira "1540.20"
+                        # -----------------------------------------------------------
+                        clean = raw.strip().lower().replace('x', '').replace(',', '')
+                        
                         if clean:
                             try:
-                                float(clean) 
-                                newest = clean
+                                # Tenta converter para float
+                                val_float = float(clean)
+                                
+                                # Usa o valor limpo para comparação
+                                newest = clean 
                                 
                                 if newest != last_val:
                                     inactivity_timer = time()
@@ -269,15 +277,17 @@ def run_bot_thread(config):
                                     key = now_save.strftime("%Y-%m-%d_%H-%M-%S")
                                     
                                     data = {
-                                        "multiplier": f"{float(newest):.2f}",
+                                        "multiplier": f"{val_float:.2f}",
                                         "time": now_save.strftime("%H:%M:%S"),
-                                        "color": get_color_class(newest),
+                                        "color": get_color_class(val_float),
                                         "date": now_save.strftime("%Y-%m-%d")
                                     }
                                     
                                     db.reference(f"{path_fb}/{key}").set(data)
                                     print(f"🔥 [{nome}] {data['multiplier']}x")
+                                    
                             except ValueError:
+                                print(f"⚠️ [{nome}] Erro de formato no valor: '{raw}'")
                                 pass 
 
                     sleep(1)
@@ -318,10 +328,11 @@ if __name__ == "__main__":
             t.start()
             threads.append(t)
             
-            # Só aguarda se tiver mais bots na fila (agora funciona corretamente com 1 ou 2)
+            # Só aguarda se tiver mais bots na fila
             if i < len(CONFIG_BOTS) - 1:
                 print(f"⏳ Aguardando 40s para iniciar o próximo bot...")
                 sleep(40)
             
         for t in threads:
             t.join()
+        
