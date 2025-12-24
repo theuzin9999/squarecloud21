@@ -16,7 +16,7 @@ import firebase_admin
 from firebase_admin import credentials, db
 
 # =============================================================
-# 🔥 GOATHBOT V6.6 - SERVER EDITION (DEEP DEBUG & TIMEOUTS)
+# 🔥 GOATHBOT V6.7 - ULTRA RESILIENTE (FIX IFRAME CONTENT)
 # =============================================================
 
 # CONFIGURAÇÕES
@@ -25,19 +25,16 @@ DATABASE_URL = 'https://history-dashboard-a70ee-default-rtdb.firebaseio.com'
 URL_DO_SITE = "https://www.goathbet.com"
 TZ_BR = pytz.timezone("America/Sao_Paulo")
 
-# Variáveis de Ambiente
 EMAIL = os.getenv("EMAIL")
 PASSWORD = os.getenv("PASSWORD")
 
-# CONFIGURAÇÃO DOS BOTS
 CONFIG_BOTS = [
     {
         "nome": "AVIATOR_1",
         "link": "https://www.goathbet.com/pt/casino/spribe/aviator",
         "firebase_path": "history"
     },
-    # =============================================================
-    # 👇👇👇 APAGUE AS 3 ASPAS ABAIXO PARA VOLTAR O AVIATOR 2 👇👇👇
+    # 👇👇👇 (APAGUE AS ASPAS PARA ATIVAR AVIATOR 2)
     """
     {
         "nome": "AVIATOR_2",
@@ -45,303 +42,156 @@ CONFIG_BOTS = [
         "firebase_path": "aviator2"
     }
     """
-    # 👆👆👆 APAGUE AS 3 ASPAS ACIMA PARA VOLTAR O AVIATOR 2 👆👆👆
 ]
 
-# Configuração de Logs
 logging.getLogger('WDM').setLevel(logging.ERROR)
 os.environ['WDM_LOG_LEVEL'] = '0'
 
 def init_firebase():
     if not firebase_admin._apps:
         try:
-            if not os.path.exists(SERVICE_ACCOUNT_FILE):
-                print(f"❌ Erro: Arquivo {SERVICE_ACCOUNT_FILE} não encontrado!")
-                exit(1)
             cred = credentials.Certificate(SERVICE_ACCOUNT_FILE)
             firebase_admin.initialize_app(cred, {'databaseURL': DATABASE_URL})
             print("✅ Firebase Conectado.")
         except Exception as e:
-            print(f"❌ Erro Crítico Firebase: {e}")
+            print(f"❌ Erro Firebase: {e}")
             exit(1)
 
 def start_driver():
     chrome_options = Options()
-    
     chrome_options.add_argument("--headless=new") 
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
-    chrome_options.add_argument("--disable-gpu")
     chrome_options.add_argument("--window-size=1366,768")
-    chrome_options.add_argument("--disable-extensions")
-    chrome_options.add_argument("--disable-infobars")
     chrome_options.add_argument("--mute-audio")
-    chrome_options.page_load_strategy = 'eager' # Carregamento rápido
-
-    # Otimizações de Memória
-    chrome_options.add_argument("--js-flags=--max-old-space-size=1024")
-    
-    # Caminho Fixo (Square Cloud / Linux)
     chrome_options.binary_location = "/usr/bin/chromium"
-    
     try:
         service = Service("/usr/bin/chromedriver")
         return webdriver.Chrome(service=service, options=chrome_options)
     except Exception as e:
-        print(f"⚠️ Erro Crítico ao Iniciar Driver: {e}")
+        print(f"⚠️ Erro Driver: {e}")
         return None
 
-def safe_click(driver, by, value, timeout=5):
-    try:
-        element = WebDriverWait(driver, timeout).until(EC.element_to_be_clickable((by, value)))
-        driver.execute_script("arguments[0].click();", element)
-        return True
-    except: return False
-
-def check_blocking_modals(driver):
-    try:
-        popups = [
-            "//button[contains(., 'Sim')]", 
-            "//button[contains(., 'Aceitar')]",
-            "//div[@role='dialog']//button"
-        ]
-        for xp in popups:
-            if safe_click(driver, By.XPATH, xp, 1): break
-    except: pass
-
 def process_login(driver, target_link):
-    print("🔑 Iniciando Login...")
+    print("🔑 Efetuando Login...")
     try:
         driver.get(URL_DO_SITE)
+        sleep(3)
+        # Login Simplificado
+        driver.get("https://www.goathbet.com/pt/login")
         sleep(2)
-        check_blocking_modals(driver)
-        
-        # Tenta clicar no botão de login
-        if safe_click(driver, By.XPATH, "//button[contains(text(), 'Entrar')]", 5) or \
-           safe_click(driver, By.CSS_SELECTOR, "a[href*='login']", 5):
-            sleep(1)
-            driver.find_element(By.NAME, "email").send_keys(EMAIL)
-            driver.find_element(By.NAME, "password").send_keys(PASSWORD)
-            safe_click(driver, By.CSS_SELECTOR, "button[type='submit']", 5)
-            sleep(3)
-    except Exception as e:
-        print(f"⚠️ Aviso Login: {e}")
-
-    print(f"🎮 Navegando: {target_link}")
+        WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.NAME, "email"))).send_keys(EMAIL)
+        driver.find_element(By.NAME, "password").send_keys(PASSWORD)
+        driver.find_element(By.CSS_SELECTOR, "button[type='submit']").click()
+        sleep(5)
+    except: pass
+    print(f"🎮 Indo para o jogo: {target_link}")
     driver.get(target_link)
-    
-    try:
-        WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.TAG_NAME, 'iframe')))
-        return True
-    except:
-        return False
+    sleep(5)
 
 def get_game_elements(driver):
     try:
         driver.switch_to.default_content()
-        
-        # 1. PROCURA IFRAME (Tenta Vários)
-        potential_iframes = [
-            "//iframe[contains(@class, 'game-iframe')]",
-            "//iframe[contains(@src, 'launch.spribegaming.com')]",
-            "//iframe[contains(@src, 'spribe')]",
-            "//iframe[contains(@src, 'aviator')]"
-        ]
-
-        iframe = None
-        for xpath in potential_iframes:
+        # Busca o iframe
+        iframes = ["//iframe[contains(@class, 'game-iframe')]", "//iframe[contains(@src, 'spribe')]"]
+        found_iframe = None
+        for path in iframes:
             try:
-                iframe = WebDriverWait(driver, 10).until( # Aumentei timeout
-                    EC.presence_of_element_located((By.XPATH, xpath))
-                )
-                if iframe: break
+                found_iframe = WebDriverWait(driver, 15).until(EC.presence_of_element_located((By.XPATH, path)))
+                if found_iframe: break
             except: continue
         
-        if not iframe:
-            print("⚠️ ERRO: Nenhum Iframe de jogo encontrado na página.")
-            return None
-
-        driver.switch_to.frame(iframe)
-        sleep(2) 
-
-        # 2. PROCURA ELEMENTO DE HISTÓRICO
-        # Aumentei o timeout para 20s, pois o jogo demora a carregar internamente
-        potential_stats = [
-            "app-stats-widget",                    # O Pai de todos (Mais seguro)
-            ".payouts-wrapper",                    # A barra fixa
-            "app-stats-dropdown",                  # O dropdown
-            ".payouts-block",                      # Bloco genérico
-            "div.stats"                            # Genérico simples
-        ]
-
-        hist = None
-        for css_selector in potential_stats:
+        if not found_iframe: return None
+        
+        driver.switch_to.frame(found_iframe)
+        
+        # 🔥 AGUARDO AGRESSIVO PELO CONTEÚDO
+        # Tenta achar o elemento que contém os números
+        selectors = [".payouts-block", "app-stats-widget", ".payouts-wrapper", "app-stats-dropdown"]
+        for sel in selectors:
             try:
-                hist = WebDriverWait(driver, 20).until( # 🔥 20 Segundos de espera
-                    EC.presence_of_element_located((By.CSS_SELECTOR, css_selector))
-                )
-                if hist: 
-                    # print(f"DEBUG: Encontrado seletor {css_selector}")
-                    break
+                el = WebDriverWait(driver, 25).until(EC.presence_of_element_located((By.CSS_SELECTOR, sel)))
+                if el: return el
             except: continue
-
-        if not hist:
-            print("⚠️ ERRO: Entrei no Iframe, mas não achei o histórico.")
-            # 🔥 DEBUG AVANÇADO: Mostra o que tem dentro do iframe se falhar
-            try:
-                source = driver.page_source
-                print(f"🔍 DEBUG HTML (Primeiros 300 chars): {source[:300]}")
-                if "Login" in source:
-                    print("🚨 ALERTA: Parece que o jogo está pedindo Login dentro do iframe.")
-            except: pass
-
-        return hist
-    except Exception as e:
-        print(f"⚠️ Erro ao buscar elementos: {e}")
+            
         return None
+    except: return None
 
 def get_color_class(value):
     try:
         m = float(value)
-        if 1.0 <= m < 2.0: return "blue-bg"
-        if 2.0 <= m < 10.0: return "purple-bg"
-        if m >= 10.0: return "magenta-bg"
-    except: pass
-    return "default-bg"
+        if m < 2.0: return "blue-bg"
+        if m < 10.0: return "purple-bg"
+        return "magenta-bg"
+    except: return "default-bg"
 
 def run_bot_thread(config):
-    if isinstance(config, str): return 
-
-    nome = config['nome']
-    link = config['link']
-    path_fb = config['firebase_path']
+    if isinstance(config, str): return
+    nome, link, path_fb = config['nome'], config['link'], config['firebase_path']
     
     while True:
-        driver = None
+        driver = start_driver()
         try:
-            print(f"🔄 [{nome}] Iniciando Driver...")
-            driver = start_driver()
-            if not driver: 
-                sleep(10)
-                continue
-
             process_login(driver, link)
-            
-            # Tenta pegar o elemento
             hist_element = get_game_elements(driver)
             
             if not hist_element:
-                print(f"❌ [{nome}] Falha Crítica de Carregamento. Tentando novamente em 10s...")
-                if driver: driver.quit()
-                sleep(10)
+                print(f"❌ [{nome}] Histórico não renderizou. Reiniciando...")
+                driver.quit()
                 continue
 
-            # 🏥 HEALTH CHECK
-            print(f"🏥 [{nome}] Validando dados...")
-            try:
-                check_ok = False
-                for _ in range(10): # Tenta por 10x (20 segundos total)
-                    pre_text = driver.execute_script("return arguments[0].innerText;", hist_element)
-                    if pre_text and any(char.isdigit() for char in pre_text):
-                        check_ok = True
-                        break
-                    sleep(2)
-                
-                if not check_ok:
-                    raise Exception("Elemento vazio (Sem números)")
-            except Exception as e:
-                print(f"⚠️ [{nome}] Falha Health Check: {e}. Reiniciando...")
-                if driver: driver.quit()
-                continue 
-
-            print(f"✅ [{nome}] Sincronizado e Operando!")
-            
-            last_signature = [] 
-            inactivity_timer = time()
+            print(f"✅ [{nome}] Monitorando...")
+            last_sig = []
+            timer = time()
 
             while True:
-                # Reinício Diário
-                now = datetime.now(TZ_BR)
-                if now.hour == 23 and now.minute == 59:
-                    print(f"🌙 [{nome}] Reinício Diário (23:59)...")
-                    driver.quit()
-                    gc.collect()
-                    sleep(65)
-                    break 
-
-                if (time() - inactivity_timer) > 180:
-                    print(f"⚠️ [{nome}] Sem dados por 3min. Reiniciando...")
-                    break
-
+                if (time() - timer) > 180: break # Timeout 3min
+                
                 try:
-                    text_data = driver.execute_script("return arguments[0].innerText;", hist_element)
+                    # JavaScript para pegar os multiplicadores direto do DOM
+                    raw_text = driver.execute_script("""
+                        let el = document.querySelector('.payouts-block') || document.querySelector('app-stats-widget');
+                        return el ? el.innerText : '';
+                    """)
                     
-                    if text_data:
-                        text_data = text_data.replace('x', '').replace('\n', ' ')
-                        multipliers = []
-                        
-                        for val in text_data.split():
+                    if raw_text:
+                        parts = raw_text.replace('x', '').replace('\n', ' ').split()
+                        mults = []
+                        for p in parts:
                             try:
-                                v = float(val)
-                                if v >= 1.0: multipliers.append(v)
+                                val = float(p.replace(',', '.'))
+                                if val >= 1.0: mults.append(val)
                             except: pass
-
-                        if multipliers:
-                            current_signature = multipliers[:5]
+                        
+                        if mults and mults[:5] != last_sig:
+                            timer = time()
+                            last_sig = mults[:5]
+                            newest = mults[0]
                             
-                            if current_signature != last_signature:
-                                inactivity_timer = time()
-                                last_signature = current_signature 
-                                
-                                newest = multipliers[0]
-                                
-                                now_save = datetime.now(TZ_BR)
-                                key = now_save.strftime("%Y-%m-%d_%H-%M-%S-%f").replace('.', '-')
-                                data = {
-                                    "multiplier": f"{newest:.2f}",
-                                    "time": now_save.strftime("%H:%M:%S"),
-                                    "color": get_color_class(newest),
-                                    "date": now_save.strftime("%Y-%m-%d")
-                                }
-                                db.reference(f"{path_fb}/{key}").set(data)
-                                print(f"🔥 [{nome}] {data['multiplier']}x")
-
+                            now = datetime.now(TZ_BR)
+                            key = now.strftime("%Y-%m-%d_%H-%M-%S-%f").replace('.', '-')
+                            db.reference(f"{path_fb}/{key}").set({
+                                "multiplier": f"{newest:.2f}",
+                                "time": now.strftime("%H:%M:%S"),
+                                "color": get_color_class(newest),
+                                "date": now.strftime("%Y-%m-%d")
+                            })
+                            print(f"🔥 [{nome}] {newest:.2f}x")
+                    
                     sleep(1)
-
-                except (StaleElementReferenceException, WebDriverException):
-                    # Se o elemento ficar obsoleto, tenta recuperar sem reiniciar o driver todo
-                    print(f"⚠️ [{nome}] Elemento perdido. Tentando recuperar...")
+                except:
                     hist_element = get_game_elements(driver)
                     if not hist_element: break
-
+                    
         except Exception as e:
-            print(f"❌ [{nome}] Erro Geral: {e}")
-            sleep(5)
-        
+            print(f"⚠️ Erro: {e}")
         finally:
-            if driver:
-                try: driver.quit()
-                except: pass
-            gc.collect()
-            sleep(5)
+            if driver: driver.quit()
+            sleep(10)
 
 if __name__ == "__main__":
-    if not EMAIL or not PASSWORD:
-        print("⛔ Configure EMAIL e PASSWORD nas Variáveis de Ambiente!")
-    else:
-        init_firebase()
-        active_bots = [b for b in CONFIG_BOTS if isinstance(b, dict)]
-        
-        threads = []
-        print(f"🚀 Iniciando {len(active_bots)} Bots...")
-        
-        for i, cfg in enumerate(active_bots):
-            t = threading.Thread(target=run_bot_thread, args=(cfg,))
-            t.start()
-            threads.append(t)
-            
-            if i < len(active_bots) - 1:
-                sleep(40)
-            
-        for t in threads:
-            t.join()
+    init_firebase()
+    active = [b for b in CONFIG_BOTS if isinstance(b, dict)]
+    for cfg in active:
+        threading.Thread(target=run_bot_thread, args=(cfg,)).start()
+        sleep(30)
