@@ -16,7 +16,7 @@ import firebase_admin
 from firebase_admin import credentials, db
 
 # =============================================================
-# 🔥 GOATHBOT V6.3 - SERVER EDITION (FIX VELAS REPETIDAS)
+# 🔥 GOATHBOT V6.3 - SERVER EDITION (UPDATE SELECTORS + AVIATOR 2 PAUSE)
 # =============================================================
 
 # CONFIGURAÇÕES
@@ -36,11 +36,18 @@ CONFIG_BOTS = [
         "link": "https://www.goathbet.com/pt/casino/spribe/aviator",
         "firebase_path": "history"
     },
+    
+    # ======================================================================
+    # ⬇️ APAGUE AS ASPAS TRIPLAS (''' ACIMA E ABAIXO) PARA REATIVAR O BOT ⬇️
+    # ======================================================================
+    '''
     {
         "nome": "AVIATOR_2",
         "link": "https://www.goathbet.com/pt/casino/spribe/aviator-2",
         "firebase_path": "aviator2"
     }
+    '''
+    # ======================================================================
 ]
 
 # Configuração de Logs
@@ -140,12 +147,21 @@ def process_login(driver, target_link):
 def get_game_elements(driver):
     try:
         driver.switch_to.default_content()
+        
+        # 1. Procura o IFRAME (Atualizado com launch.spribegaming)
         iframe = WebDriverWait(driver, 20).until(
-            EC.presence_of_element_located((By.XPATH, '//iframe[contains(@src, "spribe") or contains(@src, "aviator")]'))
+            EC.presence_of_element_located((By.XPATH, 
+                '//iframe[contains(@src, "spribe") or contains(@src, "aviator") or contains(@src, "launch.spribegaming")]'
+            ))
         )
         driver.switch_to.frame(iframe)
+        
+        # 2. Procura o Histórico (Atualizado com novos seletores e classes)
+        # Busca por: .payouts-block OU app-stats-widget OU .result-history
         hist = WebDriverWait(driver, 15).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, ".payouts-block, app-stats-widget"))
+            EC.presence_of_element_located((By.CSS_SELECTOR, 
+                ".payouts-block, app-stats-widget, .result-history, .payouts-wrapper"
+            ))
         )
         return hist
     except:
@@ -161,7 +177,7 @@ def get_color_class(value):
     return "default-bg"
 
 # =============================================================
-# 🤖 LOOP DA THREAD (BOT INDIVIDUAL) - CORRIGIDO
+# 🤖 LOOP DA THREAD (BOT INDIVIDUAL)
 # =============================================================
 def run_bot_thread(config):
     nome = config['nome']
@@ -181,15 +197,16 @@ def run_bot_thread(config):
             hist_element = get_game_elements(driver)
             
             if not hist_element:
-                print(f"⚠️ [{nome}] Falha ao encontrar histórico. Reiniciando...")
+                print(f"⚠️ [{nome}] Falha ao encontrar histórico (Iframe/Seletor). Reiniciando...")
                 if driver: driver.quit()
                 continue
 
-            # 🏥 HEALTH CHECK: Verifica se o jogo carregou DE VERDADE
+            # 🏥 HEALTH CHECK
             print(f"🏥 [{nome}] Verificando saúde do carregamento...")
             try:
                 check_ok = False
                 for _ in range(5): 
+                    # Tenta ler o texto interno (funciona tanto pro antigo quanto pro novo)
                     pre_text = driver.execute_script("return arguments[0].innerText;", hist_element)
                     if pre_text and any(char.isdigit() for char in pre_text):
                         check_ok = True
@@ -197,16 +214,15 @@ def run_bot_thread(config):
                     sleep(2)
                 
                 if not check_ok:
-                    raise Exception("Carregamento Fantasma (Elemento vazio)")
+                    raise Exception("Elemento vazio ou sem números")
             except Exception as e:
-                print(f"⚠️ [{nome}] Falha no Health Check: {e}. Reiniciando IMEDIATAMENTE...")
+                print(f"⚠️ [{nome}] Falha no Health Check: {e}. Reiniciando...")
                 if driver: driver.quit()
-                continue 
+                continue
 
             print(f"✅ [{nome}] Monitorando Ativo e Validado.")
             
-            # 🔥 CORREÇÃO: Usamos 'last_signature' (lista) ao invés de 'last_value' (único valor)
-            last_signature = [] 
+            last_value = None
             inactivity_timer = time()
 
             while True:
@@ -225,7 +241,7 @@ def run_bot_thread(config):
                     break
 
                 try:
-                    # Leitura via JS
+                    # Leitura via JS para furar cache
                     text_data = driver.execute_script("return arguments[0].innerText;", hist_element)
                     
                     if text_data:
@@ -239,15 +255,10 @@ def run_bot_thread(config):
                             except: pass
 
                         if multipliers:
-                            # 📸 Tira uma 'foto' dos 5 primeiros resultados
-                            current_signature = multipliers[:5]
-                            
-                            # Compara a FOTO da lista, e não apenas o último número
-                            if current_signature != last_signature:
+                            newest = multipliers[0]
+                            if newest != last_value:
                                 inactivity_timer = time()
-                                last_signature = current_signature # Atualiza a assinatura
-                                
-                                newest = multipliers[0] # Pega o mais recente
+                                last_value = newest
                                 
                                 now_save = datetime.now(TZ_BR)
                                 key = now_save.strftime("%Y-%m-%d_%H-%M-%S-%f").replace('.', '-')
@@ -286,15 +297,19 @@ if __name__ == "__main__":
     else:
         init_firebase()
         threads = []
-        print(f"🚀 Iniciando {len(CONFIG_BOTS)} Bots com LARGADA ESCALONADA...")
         
-        for i, cfg in enumerate(CONFIG_BOTS):
+        # Filtra apenas configurações válidas (ignora strings/comentários na lista)
+        active_bots = [cfg for cfg in CONFIG_BOTS if isinstance(cfg, dict)]
+        
+        print(f"🚀 Iniciando {len(active_bots)} Bots com LARGADA ESCALONADA...")
+        
+        for i, cfg in enumerate(active_bots):
             t = threading.Thread(target=run_bot_thread, args=(cfg,))
             t.start()
             threads.append(t)
             
-            # 🛑 STAGGERED START
-            if i < len(CONFIG_BOTS) - 1:
+            # STAGGERED START
+            if i < len(active_bots) - 1:
                 print(f"⏳ Aguardando 40s para iniciar o próximo bot...")
                 sleep(40)
             
