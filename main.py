@@ -10,18 +10,18 @@ from selenium.webdriver.common.by import By
 import firebase_admin
 from firebase_admin import credentials, db
 
-# CONFIGURAÇÕES BÁSICAS
+# CONFIGURAÇÕES
 SERVICE_ACCOUNT_FILE = 'serviceAccountKey.json'
 DATABASE_URL = 'https://history-dashboard-a70ee-default-rtdb.firebaseio.com'
 TZ_BR = pytz.timezone("America/Sao_Paulo")
 EMAIL = os.getenv("EMAIL")
 PASSWORD = os.getenv("PASSWORD")
 
+# CONFIGURAÇÃO DOS BOTS (Adicionado o marcador solicitado)
 CONFIG_BOTS = [
     {"nome": "AVIATOR_1", "link": "https://www.goathbet.com/pt/casino/spribe/aviator", "path": "history"},
-    # """ PARA VOLTAR O AVIATOR 2 APAGUE ESTA LINHA E A ÚLTIMA DAS CONFIGS
+    # 👇👇👇 (APAGUE AQUI PARA VOLTAR O AVIATOR 2) 👇👇👇
     # {"nome": "AVIATOR_2", "link": "https://www.goathbet.com/pt/casino/spribe/aviator-2", "path": "aviator2"}
-    # """
 ]
 
 def init_firebase():
@@ -43,47 +43,65 @@ def run_bot(config):
     driver = start_driver()
     
     try:
-        # LOGIN RÁPIDO
+        # LOGIN
         driver.get("https://www.goathbet.com/pt/login")
         sleep(5)
-        driver.find_element(By.NAME, "email").send_keys(EMAIL)
-        driver.find_element(By.NAME, "password").send_keys(PASSWORD)
-        driver.find_element(By.CSS_SELECTOR, "button[type='submit']").click()
-        sleep(8)
+        try:
+            driver.find_element(By.NAME, "email").send_keys(EMAIL)
+            driver.find_element(By.NAME, "password").send_keys(PASSWORD)
+            driver.find_element(By.CSS_SELECTOR, "button[type='submit']").click()
+            sleep(8)
+        except: pass
         
         driver.get(link)
-        print(f"🚀 [{nome}] Scanner iniciado. Aguardando carregamento do jogo...")
-        sleep(15) # Tempo para o iframe carregar
+        print(f"🚀 [{nome}] Iniciando Inspeção Automática...")
+        sleep(15) 
 
         last_sig = []
         
         while True:
             try:
-                # 🛠️ O "INSPECIONAR" AUTOMÁTICO
-                # Esse script abaixo faz o que você sugeriu: ele procura em todos os frames 
-                # pelo bloco de payouts e devolve o texto pra gente.
+                # 🛠️ A MÁGICA DO "INSPECIONAR":
+                # Este script varre a página procurando o iframe correto e 
+                # extrai o texto dos multiplicadores diretamente do código-fonte interno.
+                # Prioridade: payouts-block (novo) -> payouts-wrapper (visual) -> stats (antigo)
                 data = driver.execute_script("""
-                    let frames = document.querySelectorAll('iframe');
-                    for (let f of frames) {
-                        try {
-                            let doc = f.contentDocument || f.contentWindow.document;
-                            let target = doc.querySelector('.payouts-block') || doc.querySelector('.payouts-wrapper') || doc.querySelector('app-stats-widget');
-                            if (target && target.innerText.length > 5) return target.innerText;
-                        } catch(e) {}
+                    function getStats() {
+                        let frames = document.querySelectorAll('iframe');
+                        for (let f of frames) {
+                            try {
+                                let doc = f.contentDocument || f.contentWindow.document;
+                                // Tenta todos os seletores conhecidos de uma vez
+                                let target = doc.querySelector('.payouts-block') || 
+                                             doc.querySelector('.payouts-wrapper') || 
+                                             doc.querySelector('app-stats-widget') ||
+                                             doc.querySelector('.stats-list');
+                                             
+                                if (target && target.innerText.length > 3) {
+                                    return target.innerText;
+                                }
+                            } catch(e) {}
+                        }
+                        return null;
                     }
-                    return null;
+                    return getStats();
                 """)
 
                 if data:
-                    # Limpa e converte os números
+                    # Filtra apenas os números (ex: 1.50, 2.00)
                     parts = data.replace('x', '').replace('\n', ' ').split()
-                    mults = [float(p.replace(',', '.')) for p in parts if p.replace(',', '.').replace('.', '').isdigit()][:10]
+                    mults = []
+                    for p in parts:
+                        try:
+                            val = float(p.replace(',', '.'))
+                            if val >= 1.0: mults.append(val)
+                        except: pass
 
-                    if mults and mults != last_sig:
-                        last_sig = mults
+                    # Só envia se a lista mudou (evita duplicados)
+                    if mults and mults[:5] != last_sig:
+                        last_sig = mults[:5]
                         newest = mults[0]
                         
-                        # Define a cor
                         cor = "blue-bg" if newest < 2.0 else "purple-bg" if newest < 10.0 else "magenta-bg"
                         
                         now = datetime.now(TZ_BR)
@@ -95,20 +113,22 @@ def run_bot(config):
                             "color": cor,
                             "date": now.strftime("%Y-%m-%d")
                         })
-                        print(f"🔥 [{nome}] Capturado: {newest:.2f}x")
+                        print(f"🔥 [{nome}] NOVO RESULTADO: {newest:.2f}x")
 
-                sleep(2) # Evita sobrecarga
-            except Exception as e:
-                sleep(5)
+                sleep(1) 
+            except Exception:
+                sleep(2)
                 continue
 
     except Exception as e:
-        print(f"❌ Erro no Bot {nome}: {e}")
+        print(f"❌ Erro Crítico: {e}")
     finally:
         driver.quit()
 
 if __name__ == "__main__":
     init_firebase()
-    for cfg in CONFIG_BOTS:
+    # Filtra apenas o que não for string (comentário)
+    active = [c for c in CONFIG_BOTS if isinstance(c, dict)]
+    for cfg in active:
         threading.Thread(target=run_bot, args=(cfg,)).start()
-        sleep(10)
+        sleep(5)
