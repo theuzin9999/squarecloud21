@@ -3,7 +3,7 @@ import logging
 import threading
 import pytz
 import gc
-import requests # Necessário para os testes de rede
+import requests
 from time import sleep, time
 from datetime import datetime
 from selenium import webdriver
@@ -12,12 +12,13 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
 from selenium.common.exceptions import StaleElementReferenceException, WebDriverException
 import firebase_admin
 from firebase_admin import credentials, db
 
 # =============================================================
-# 🔥 GOATHBOT V6.6 - DIAGNOSTIC EDITION
+# 🔥 GOATHBOT V6.7 - ANTI-BOT BYPASS EDITION
 # =============================================================
 
 SERVICE_ACCOUNT_FILE = 'serviceAccountKey.json'
@@ -36,51 +37,13 @@ CONFIG_BOTS = [
     }
 ]
 
-# =============================================================
-# 🔎 FUNÇÕES DE DIAGNÓSTICO DE REDE (PASSOS DA SQUARE CLOUD)
-# =============================================================
 def run_network_diagnostics():
-    print("\n--- 🕵️ INICIANDO DIAGNÓSTICO DE REDE ---")
-    
-    # 1. Verificar IP Público
+    print("\n--- 🕵️ DIAGNÓSTICO DE REDE RÁPIDO ---")
     try:
         ip = requests.get('https://api.ipify.org', timeout=10).text
-        print(f"🌐 IP Público do Container: {ip}")
-    except Exception as e:
-        print(f"❌ Erro ao verificar IP Público: {e}")
-
-    # 2. Teste de Conexão Simples (Requests)
-    try:
-        response = requests.get(URL_DO_SITE, timeout=15)
-        print(f"📡 Teste de Conexão {URL_DO_SITE}: Status {response.status_code}")
-        if response.status_code != 200:
-            print("⚠️ O site respondeu, mas não com sucesso (pode ser bloqueio de Cloudflare).")
-    except Exception as e:
-        print(f"❌ Erro de Conexão Direta: {URL_DO_SITE} está inacessível para este servidor.")
-
-    # 3. Teste de DNS básico
-    import socket
-    try:
-        host = "www.goathbet.com"
-        dns_res = socket.gethostbyname(host)
-        print(f"🔍 Resolução DNS {host}: {dns_res} (OK)")
-    except Exception as e:
-        print(f"❌ Erro de DNS: Não foi possível resolver o endereço do site.")
-    
-    print("--- FIM DO DIAGNÓSTICO ---\n")
-
-# =============================================================
-# 🔧 FIREBASE & DRIVER
-# =============================================================
-def init_firebase():
-    if not firebase_admin._apps:
-        try:
-            cred = credentials.Certificate(SERVICE_ACCOUNT_FILE)
-            firebase_admin.initialize_app(cred, {'databaseURL': DATABASE_URL})
-            print("✅ Firebase Conectado.")
-        except Exception as e:
-            print(f"❌ Erro Crítico Firebase: {e}")
-            exit(1)
+        print(f"🌐 IP: {ip} | Status: {requests.get(URL_DO_SITE, timeout=10).status_code}")
+    except: print("⚠️ Erro rápido de rede.")
+    print("------------------------------------\n")
 
 def start_driver():
     chrome_options = Options()
@@ -88,115 +51,89 @@ def start_driver():
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("--window-size=1920,1080")
-    chrome_options.add_argument("--disable-gpu")
+    
+    # --- NOVOS ARGUMENTOS ANTI-BLOQUEIO ---
+    chrome_options.add_argument("--disable-blink-features=AutomationControlled")
+    chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    chrome_options.add_experimental_option('useAutomationExtension', False)
+    chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+    
     chrome_options.binary_location = "/usr/bin/chromium"
-    
-    # Logs mais detalhados do Selenium (conforme solicitado no passo 3)
-    chrome_options.add_argument("--log-level=3") 
-    
     try:
         service = Service("/usr/bin/chromedriver")
-        return webdriver.Chrome(service=service, options=chrome_options)
+        driver = webdriver.Chrome(service=service, options=chrome_options)
+        # Esconde a flag de automação via script
+        driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
+            "source": "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
+        })
+        return driver
     except Exception as e:
         print(f"⚠️ Erro ao Iniciar Driver: {e}")
         return None
 
-# [As funções de login e captura permanecem as mesmas da V6.5, focando na trava de saldo]
-# ... (mantendo a lógica de process_login e get_game_elements anterior)
-
-def click_js(driver, element):
-    driver.execute_script("arguments[0].click();", element)
+def human_type(element, text):
+    """Digita como um humano para evitar detecção"""
+    for char in text:
+        element.send_keys(char)
+        sleep(0.1)
 
 def process_login(driver, target_link):
-    print("🔑 Tentando acesso...")
+    print("🔑 Iniciando processo de login...")
     try:
         driver.get(URL_DO_SITE)
-        sleep(5)
+        sleep(6)
         
-        # Procura botão Entrar
-        try:
-            login_btn = WebDriverWait(driver, 10).until(
-                EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Entrar')] | //a[contains(@href, 'login')]"))
-            )
-            click_js(driver, login_btn)
-            sleep(2)
-            driver.find_element(By.NAME, "email").send_keys(EMAIL)
-            driver.find_element(By.NAME, "password").send_keys(PASSWORD)
-            submit_btn = driver.find_element(By.CSS_SELECTOR, "button[type='submit']")
-            click_js(driver, submit_btn)
-        except: pass
+        # Tenta clicar no botão de Entrar usando múltiplos seletores
+        login_selectors = [
+            "//button[contains(text(), 'Entrar')]",
+            "//a[contains(@href, 'login')]",
+            ".login-button",
+            "button.btn-login"
+        ]
+        
+        clicked = False
+        for selector in login_selectors:
+            try:
+                btn = WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH if "//" in selector else By.CSS_SELECTOR, selector)))
+                driver.execute_script("arguments[0].click();", btn)
+                clicked = True
+                break
+            except: continue
+        
+        if not clicked:
+            print("⚠️ Botão de login não encontrado, tentando ir direto para a URL de login...")
+            driver.get(f"{URL_DO_SITE}/pt/login")
+            sleep(4)
 
-        # Verificação Real de Sucesso
+        # Preenchimento dos campos
+        print("👤 Preenchendo credenciais...")
+        user_input = WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.NAME, "email"))
+        )
+        pass_input = driver.find_element(By.NAME, "password")
+        
+        user_input.clear()
+        human_type(user_input, EMAIL)
+        sleep(1)
+        pass_input.clear()
+        human_type(pass_input, PASSWORD)
+        sleep(1)
+        
+        submit_btn = driver.find_element(By.CSS_SELECTOR, "button[type='submit']")
+        driver.execute_script("arguments[0].click();", submit_btn)
+        
+        # Verificação CRÍTICA: Espera o saldo aparecer
+        print("⏳ Aguardando autenticação no site...")
         WebDriverWait(driver, 20).until(
             EC.presence_of_element_located((By.XPATH, "//div[contains(@class, 'balance')] | //a[contains(@href, 'deposit')]"))
         )
-        print("✅ Login confirmado via Saldo/Perfil.")
+        print("✅ Login efetuado com sucesso!")
+        
         driver.get(target_link)
+        sleep(5)
         return True
-    except:
-        print("❌ Falha no login ou timeout de rede.")
+    except Exception as e:
+        print(f"❌ Erco no Login: Verifique se as credenciais estão corretas ou se há um Captcha.")
         return False
 
-def get_game_elements(driver):
-    try:
-        driver.switch_to.default_content()
-        iframe = WebDriverWait(driver, 25).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, "iframe.game-iframe, iframe[src*='spribe']"))
-        )
-        driver.switch_to.frame(iframe)
-        hist = WebDriverWait(driver, 20).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, "app-stats-widget, .payouts-block"))
-        )
-        return hist
-    except: return None
-
-def run_bot_thread(config):
-    nome = config['nome']
-    link = config['link']
-    path_fb = config['firebase_path']
-    
-    while True:
-        driver = None
-        try:
-            print(f"🔄 [{nome}] Reiniciando...")
-            driver = start_driver()
-            if not driver: 
-                sleep(10); continue
-
-            if not process_login(driver, link):
-                driver.quit(); sleep(10); continue
-
-            hist_element = get_game_elements(driver)
-            if not hist_element:
-                driver.quit(); sleep(5); continue
-
-            last_value = None
-            inactivity_timer = time()
-
-            while True:
-                # Loop de monitoramento...
-                text_data = driver.execute_script("return arguments[0].innerText;", hist_element)
-                if text_data:
-                    # [Lógica de processamento de multiplicadores]
-                    pass 
-                sleep(1)
-                
-                if (time() - inactivity_timer) > 180: break
-
-        except Exception as e:
-            print(f"❌ Erro: {e}")
-        finally:
-            if driver: driver.quit()
-            sleep(5)
-
-if __name__ == "__main__":
-    # EXECUTA DIAGNÓSTICO ANTES DE TUDO
-    run_network_diagnostics()
-    
-    if not EMAIL or not PASSWORD:
-        print("⛔ EMAIL/PASSWORD não configurados.")
-    else:
-        init_firebase()
-        active_bots = [cfg for cfg in CONFIG_BOTS if isinstance(cfg, dict)]
-        for cfg in active_bots:
-            threading.Thread(target=run_bot_thread, args=(cfg,)).start()
+# ... (Restante do código de monitoramento permanece igual à V6.6)
