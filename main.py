@@ -16,7 +16,7 @@ import firebase_admin
 from firebase_admin import credentials, db
 
 # =============================================================
-# 🔥 GOATHBOT V6.3 - SERVER EDITION (UPDATE SELECTORS + AVIATOR 2 PAUSE)
+# 🔥 GOATHBOT V6.2 - SERVER EDITION (STAGGERED START + HEALTH CHECK)
 # =============================================================
 
 # CONFIGURAÇÕES
@@ -36,18 +36,11 @@ CONFIG_BOTS = [
         "link": "https://www.goathbet.com/pt/casino/spribe/aviator",
         "firebase_path": "history"
     },
-    
-    # ======================================================================
-    # ⬇️ APAGUE AS ASPAS TRIPLAS (''' ACIMA E ABAIXO) PARA REATIVAR O BOT ⬇️
-    # ======================================================================
-    '''
     {
         "nome": "AVIATOR_2",
         "link": "https://www.goathbet.com/pt/casino/spribe/aviator-2",
         "firebase_path": "aviator2"
     }
-    '''
-    # ======================================================================
 ]
 
 # Configuração de Logs
@@ -147,21 +140,12 @@ def process_login(driver, target_link):
 def get_game_elements(driver):
     try:
         driver.switch_to.default_content()
-        
-        # 1. Procura o IFRAME (Atualizado com launch.spribegaming)
         iframe = WebDriverWait(driver, 20).until(
-            EC.presence_of_element_located((By.XPATH, 
-                '//iframe[contains(@src, "spribe") or contains(@src, "aviator") or contains(@src, "launch.spribegaming")]'
-            ))
+            EC.presence_of_element_located((By.XPATH, '//iframe[contains(@src, "spribe") or contains(@src, "aviator")]'))
         )
         driver.switch_to.frame(iframe)
-        
-        # 2. Procura o Histórico (Atualizado com novos seletores e classes)
-        # Busca por: .payouts-block OU app-stats-widget OU .result-history
         hist = WebDriverWait(driver, 15).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, 
-                ".payouts-block, app-stats-widget, .result-history, .payouts-wrapper"
-            ))
+            EC.presence_of_element_located((By.CSS_SELECTOR, ".payouts-block, app-stats-widget"))
         )
         return hist
     except:
@@ -197,16 +181,16 @@ def run_bot_thread(config):
             hist_element = get_game_elements(driver)
             
             if not hist_element:
-                print(f"⚠️ [{nome}] Falha ao encontrar histórico (Iframe/Seletor). Reiniciando...")
+                print(f"⚠️ [{nome}] Falha ao encontrar histórico. Reiniciando...")
                 if driver: driver.quit()
                 continue
 
-            # 🏥 HEALTH CHECK
+            # 🏥 HEALTH CHECK: Verifica se o jogo carregou DE VERDADE antes de monitorar
+            # Isso evita ficar 3 minutos parado em uma tela em branco ("Monitorando Ativo" falso)
             print(f"🏥 [{nome}] Verificando saúde do carregamento...")
             try:
                 check_ok = False
-                for _ in range(5): 
-                    # Tenta ler o texto interno (funciona tanto pro antigo quanto pro novo)
+                for _ in range(5): # Tenta ler por 10 segundos
                     pre_text = driver.execute_script("return arguments[0].innerText;", hist_element)
                     if pre_text and any(char.isdigit() for char in pre_text):
                         check_ok = True
@@ -214,11 +198,11 @@ def run_bot_thread(config):
                     sleep(2)
                 
                 if not check_ok:
-                    raise Exception("Elemento vazio ou sem números")
+                    raise Exception("Carregamento Fantasma (Elemento vazio)")
             except Exception as e:
-                print(f"⚠️ [{nome}] Falha no Health Check: {e}. Reiniciando...")
+                print(f"⚠️ [{nome}] Falha no Health Check: {e}. Reiniciando IMEDIATAMENTE...")
                 if driver: driver.quit()
-                continue
+                continue # Reinicia o loop sem esperar 3 minutos
 
             print(f"✅ [{nome}] Monitorando Ativo e Validado.")
             
@@ -235,7 +219,7 @@ def run_bot_thread(config):
                     sleep(65)
                     break 
 
-                # ⚠️ Timeout de 180s
+                # ⚠️ Timeout de 180s (3 min) para tolerar velas altas
                 if (time() - inactivity_timer) > 180:
                     print(f"⚠️ [{nome}] Sem dados novos há 3min. Reiniciando Driver...")
                     break
@@ -297,19 +281,16 @@ if __name__ == "__main__":
     else:
         init_firebase()
         threads = []
+        print(f"🚀 Iniciando {len(CONFIG_BOTS)} Bots com LARGADA ESCALONADA...")
         
-        # Filtra apenas configurações válidas (ignora strings/comentários na lista)
-        active_bots = [cfg for cfg in CONFIG_BOTS if isinstance(cfg, dict)]
-        
-        print(f"🚀 Iniciando {len(active_bots)} Bots com LARGADA ESCALONADA...")
-        
-        for i, cfg in enumerate(active_bots):
+        for i, cfg in enumerate(CONFIG_BOTS):
             t = threading.Thread(target=run_bot_thread, args=(cfg,))
             t.start()
             threads.append(t)
             
-            # STAGGERED START
-            if i < len(active_bots) - 1:
+            # 🛑 STAGGERED START: Espera 40s entre o início de cada bot
+            # Isso evita que os dois tentem abrir o Chrome ao mesmo tempo e travem a CPU
+            if i < len(CONFIG_BOTS) - 1:
                 print(f"⏳ Aguardando 40s para iniciar o próximo bot...")
                 sleep(40)
             
