@@ -43,7 +43,6 @@ CONFIG_BOTS = [
     }
 ]
 
-''' 
 ⬇️ ⬇️ ⬇️ APAGUE ESTAS 3 ASPAS E AS 3 DO FINAL PARA REATIVAR O AVIATOR 2 ⬇️ ⬇️ ⬇️
 CONFIG_BOTS.append({
     "nome": "AVIATOR_2",
@@ -51,7 +50,6 @@ CONFIG_BOTS.append({
     "firebase_path": "aviator2"
 })
 ⬆️ ⬆️ ⬆️ APAGUE ESTAS 3 ASPAS PARA REATIVAR O AVIATOR 2 ⬆️ ⬆️ ⬆️
-'''
 
 # Configuração de Logs
 logging.getLogger('WDM').setLevel(logging.ERROR)
