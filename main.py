@@ -183,7 +183,7 @@ def get_game_elements(driver):
     try:
         driver.switch_to.default_content()
         iframe = WebDriverWait(driver, 25).until(
-            EC.presence_of_element_located((By.XPATH, '//iframe[contains(@src, "spribegaming") or contains(@src, "aviator")]')
+            EC.presence_of_element_located((By.XPATH, "//iframe[contains(@src, 'spribegaming') or contains(@src, 'aviator')]"))
         )
         driver.switch_to.frame(iframe)
         hist = WebDriverWait(driver, 20).until(
@@ -338,3 +338,4 @@ if __name__ == "__main__":
             
         for t in threads:
             t.join()
+        
