@@ -98,8 +98,8 @@ def start_driver():
     options.add_argument("--disable-extensions")
     options.add_argument("--mute-audio")
     
-    # User-Agent específico
-    options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36")
+    # User-Agent Linux para Square Cloud
+    options.add_argument("user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 
     # Caminho Fixo Square Cloud / Linux
     options.binary_location = "/usr/bin/chromium"
@@ -134,33 +134,13 @@ def process_login(driver, target_link):
                     if btn.is_displayed(): btn.click()
             except: pass
 
-        # Clica em entrar - com fallback para seletores diferentes
-        try:
-            if driver.find_elements(By.XPATH, "//button[contains(., 'Entrar')]"):
-                driver.find_element(By.XPATH, "//button[contains(., 'Entrar')]").click()
-            elif driver.find_elements(By.CSS_SELECTOR, "a[href*='login']"):
-                driver.find_element(By.CSS_SELECTOR, "a[href*='login']").click()
-            sleep(2)
-        except: pass
-            
-        # Espera pelo campo de email pelo ID ou NAME (fallback)
-        try:
-            WebDriverWait(driver, 5).until(EC.presence_of_element_located((By.ID, "email")))
-            email_el = driver.find_element(By.ID, "email")
-            pass_el = driver.find_element(By.ID, "password")
-        except:
-            email_el = WebDriverWait(driver, 5).until(EC.presence_of_element_located((By.NAME, "email")))
-            pass_el = driver.find_element(By.NAME, "password")
-        email_el.send_keys(EMAIL)
-        pass_el.send_keys(PASSWORD)
-        sleep(1)
-        
-        submit = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.CSS_SELECTOR, "button[type='submit']")))
-        submit.click()
-        
-        print("✅ Dados enviados, aguardando login...")
-        sleep(10)
-        
+        WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Entrar')]"))).click()
+        sleep(2)
+        driver.find_element(By.NAME, "email").send_keys(EMAIL)
+        driver.find_element(By.NAME, "password").send_keys(PASSWORD)
+        driver.find_element(By.CSS_SELECTOR, "button[type='submit']").click()
+        print("✅ Login enviado.")
+        sleep(10) 
     except Exception as e:
         print(f"⚠️ Aviso Login: {e}")
 
@@ -170,10 +150,9 @@ def process_login(driver, target_link):
     
     try:
         WebDriverWait(driver, 40).until(EC.presence_of_element_located((By.TAG_NAME, 'iframe')))
-        print(f"[DEBUG] iframe encontrado após login")
         return True
     except Exception as e:
-        print(f"[DEBUG] iframe não encontrado após login: {e}")
+        print(f"⚠️ iframe não encontrado: {e}")
         return False
 
 # =============================================================
