@@ -143,18 +143,24 @@ def process_login(driver, target_link):
             sleep(2)
         except: pass
             
-        # Espera pelo campo de email pelo ID (mais confiável)
-        WebDriverWait(driver, 5).until(EC.presence_of_element_located((By.ID, "email")))
-        driver.find_element(By.ID, "email").send_keys(EMAIL)
-        driver.find_element(By.ID, "password").send_keys(PASSWORD)
+        # Espera pelo campo de email pelo ID ou NAME (fallback)
+        try:
+            WebDriverWait(driver, 5).until(EC.presence_of_element_located((By.ID, "email")))
+            email_el = driver.find_element(By.ID, "email")
+            pass_el = driver.find_element(By.ID, "password")
+        except:
+            email_el = WebDriverWait(driver, 5).until(EC.presence_of_element_located((By.NAME, "email")))
+            pass_el = driver.find_element(By.NAME, "password")
+        email_el.send_keys(EMAIL)
+        pass_el.send_keys(PASSWORD)
         sleep(1)
         
         submit = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.CSS_SELECTOR, "button[type='submit']")))
         submit.click()
         
-        print("✅ Dados enviados, aguardando 10s...")
+        print("✅ Dados enviados, aguardando login...")
         sleep(10)
-
+        
     except Exception as e:
         print(f"⚠️ Aviso Login: {e}")
 
@@ -163,7 +169,7 @@ def process_login(driver, target_link):
     sleep(8)
     
     try:
-        WebDriverWait(driver, 25).until(EC.presence_of_element_located((By.TAG_NAME, 'iframe')))
+        WebDriverWait(driver, 40).until(EC.presence_of_element_located((By.TAG_NAME, 'iframe')))
         print(f"[DEBUG] iframe encontrado após login")
         return True
     except Exception as e:
@@ -183,10 +189,9 @@ def get_game_elements(driver):
         hist = WebDriverWait(driver, 20).until(
             EC.presence_of_element_located((By.CSS_SELECTOR, ".payouts-block, .payouts-wrapper, [appcoloredmultiplier]"))
         )
-        print(f"[DEBUG] Histórico encontrado: {hist.get_attribute('class')}")
         return hist
     except Exception as e:
-        print(f"[DEBUG] Erro get_game_elements: {e}")
+        print(f"⚠️ Erro busca histórico: {e}")
         return None
 
 def get_color_class(value):
