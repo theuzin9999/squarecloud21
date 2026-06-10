@@ -97,28 +97,16 @@ def start_driver():
     options.add_argument("--log-level=3")
     options.add_argument("--disable-extensions")
     options.add_argument("--mute-audio")
-    
-    # User-Agent mais genérico
+     
+    # User-Agent
     options.add_argument("user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36")
-    
-    # Opções anti-detecção
-    options.add_argument("--disable-blink-features=AutomationControlled")
-    options.add_experimental_option("excludeSwitches", ["enable-automation"])
-    options.add_experimental_option('useAutomationExtension', False)
 
     # Caminho Fixo Square Cloud / Linux
     options.binary_location = "/usr/bin/chromium"
     
     try:
         service = Service("/usr/bin/chromedriver")
-        driver = webdriver.Chrome(service=service, options=options)
-        # Oculta selenium
-        driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
-            "source": """
-                Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
-            """
-        })
-        return driver
+        return webdriver.Chrome(service=service, options=options)
     except Exception as e:
         print(f"⚠️ Erro Crítico ao Iniciar Driver: {e}")
         return None
