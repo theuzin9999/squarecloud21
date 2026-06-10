@@ -45,7 +45,7 @@ CONFIG_BOTS = [
 
 CONFIG_BOTS.append({
     "nome": "AVIATOR_2",
-    "link": "https://www.goathbet.com/pt/casino/spribe/aviator-2",
+    "link": "https://www.goathbet.com/casino/spribe/aviator-vip",
     "firebase_path": "aviator2"
 })
 
@@ -98,9 +98,9 @@ def start_driver():
     options.add_argument("--disable-extensions")
     options.add_argument("--mute-audio")
     
-    # User-Agent específico
-    options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36")
-
+    # User-Agent Windows (mais comum)
+    options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+    
     # Caminho Fixo Square Cloud / Linux
     options.binary_location = "/usr/bin/chromium"
     
@@ -120,7 +120,6 @@ def process_login(driver, target_link):
         driver.get(URL_DO_SITE)
         sleep(5)
         
-        # Fecha modais de bloqueio
         botoes_fechar = [
             "//button[contains(., 'Sim')]", 
             "//button[contains(., 'Aceitar')]", 
@@ -135,37 +134,25 @@ def process_login(driver, target_link):
                     if btn.is_displayed(): btn.click()
             except: pass
 
-        # Clica em entrar
-        try:
-            if driver.find_elements(By.XPATH, "//button[contains(., 'Entrar')]"):
-                driver.find_element(By.XPATH, "//button[contains(., 'Entrar')]").click()
-            elif driver.find_elements(By.CSS_SELECTOR, "a[href*='login']"):
-                driver.find_element(By.CSS_SELECTOR, "a[href*='login']").click()
-            sleep(2)
-        except: pass
-            
+        WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Entrar')]"))).click()
+        sleep(2)
         driver.find_element(By.NAME, "email").send_keys(EMAIL)
         driver.find_element(By.NAME, "password").send_keys(PASSWORD)
-        sleep(1)
-        
-        # Click seguro no submit
-        submit = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.CSS_SELECTOR, "button[type='submit']")))
-        submit.click()
-        
-        print("✅ Dados enviados, aguardando 10s...")
-        sleep(10)
-
+        driver.find_element(By.CSS_SELECTOR, "button[type='submit']").click()
+        print("✅ Login enviado.")
+        sleep(10) 
     except Exception as e:
         print(f"⚠️ Aviso Login: {e}")
 
     print(f"🎮 Navegando: {target_link}")
     driver.get(target_link)
-    sleep(5)
+    sleep(8)
     
     try:
-        WebDriverWait(driver, 25).until(EC.presence_of_element_located((By.TAG_NAME, 'iframe')))
+        WebDriverWait(driver, 40).until(EC.presence_of_element_located((By.TAG_NAME, 'iframe')))
         return True
-    except:
+    except Exception as e:
+        print(f"⚠️ iframe não encontrado: {e}")
         return False
 
 # =============================================================
@@ -174,17 +161,16 @@ def process_login(driver, target_link):
 def get_game_elements(driver):
     try:
         driver.switch_to.default_content()
-        # Procura iframe
         iframe = WebDriverWait(driver, 25).until(
-            EC.presence_of_element_located((By.XPATH, '//iframe[contains(@src, "spribe") or contains(@src, "aviator")]'))
+            EC.presence_of_element_located((By.XPATH, "//iframe[contains(@src, 'spribegaming') or contains(@src, 'aviator')]"))
         )
         driver.switch_to.frame(iframe)
-        # Elemento de histórico
-        hist = WebDriverWait(driver, 15).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, "app-stats-widget, .payouts-block"))
+        hist = WebDriverWait(driver, 20).until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, ".payouts-block, .payouts-wrapper, [appcoloredmultiplier]"))
         )
         return hist
-    except:
+    except Exception as e:
+        print(f"⚠️ Erro busca histórico: {e}")
         return None
 
 def get_color_class(value):
@@ -245,7 +231,7 @@ def run_bot_thread(config):
 
                 try:
                     try:
-                        first_payout = hist_el.find_element(By.CSS_SELECTOR, ".payout:first-child, .bubble-multiplier:first-child")
+                        first_payout = hist_el.find_element(By.CSS_SELECTOR, "[appcoloredmultiplier].payout:first-child, .payout:first-child, .bubble-multiplier:first-child")
                         raw = first_payout.get_attribute("innerText")
                     except:
                         raw = None
