@@ -1,4 +1,5 @@
 selenium
 firebase-admin
+webdriver-manager
 pytz
 requests
