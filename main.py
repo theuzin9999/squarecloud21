@@ -16,148 +16,92 @@ from selenium.common.exceptions import StaleElementReferenceException, WebDriver
 import firebase_admin
 from firebase_admin import credentials, db
 
-# =============================================================
-# 🔥 GOATHBOT V7.2 - FIX VELAS ALTAS
-# =============================================================
-
-# CONFIGURAÇÕES GERAIS
 SERVICE_ACCOUNT_FILE = 'serviceAccountKey.json'
 DATABASE_URL = 'https://history-dashboard-a70ee-default-rtdb.firebaseio.com'
 URL_DO_SITE = "https://www.goathbet.com"
 TZ_BR = pytz.timezone("America/Sao_Paulo")
 
-# Variáveis de Ambiente
 EMAIL = os.getenv("EMAIL")
 PASSWORD = os.getenv("PASSWORD")
 
-# =============================================================
-# 🤖 CONFIGURAÇÃO DOS BOTS (MODO EDITÁVEL)
-# =============================================================
-
-# 1. Este é o Bot que está funcionando AGORA (Aviator 1)
 CONFIG_BOTS = [
-    {
-        "nome": "AVIATOR_1",
-        "link": "https://www.goathbet.com/pt/casino/spribe/aviator",
-        "firebase_path": "history"
-    }
+    {"nome": "AVIATOR_1", "link": "https://www.goathbet.com/pt/casino/spribe/aviator", "firebase_path": "history"}
 ]
+CONFIG_BOTS.append({"nome": "AVIATOR_2", "link": "https://www.goathbet.com/casino/spribe/aviator-vip", "firebase_path": "aviator2"})
 
-CONFIG_BOTS.append({
-    "nome": "AVIATOR_2",
-    "link": "https://www.goathbet.com/casino/spribe/aviator-vip",
-    "firebase_path": "aviator2"
-})
-
-# Configuração de Logs
 logging.getLogger('WDM').setLevel(logging.ERROR)
 os.environ['WDM_LOG_LEVEL'] = '0'
 
-# =============================================================
-# 🔎 DIAGNÓSTICO DE REDE
-# =============================================================
 def run_diagnostics():
-    print("\n--- 🕵️ DIAGNÓSTICO DE CONEXÃO ---")
+    print("\n--- DIAGNOSTICO ---")
     try:
         ip = requests.get('https://api.ipify.org', timeout=10).text
-        print(f"🌐 IP Público: {ip}")
+        print(f"IP: {ip}")
         res = requests.get(URL_DO_SITE, timeout=10)
-        print(f"📡 Status Site: {res.status_code}")
+        print(f"Status Site: {res.status_code}")
     except Exception as e:
-        print(f"⚠️ Alerta de Rede: {e}")
-    print("----------------------------------\n")
+        print(f"Erro rede: {e}")
+    print("-------------------\n")
 
-# =============================================================
-# 🔧 FIREBASE INIT
-# =============================================================
 def init_firebase():
     if not firebase_admin._apps:
         try:
-            if not os.path.exists(SERVICE_ACCOUNT_FILE):
-                print(f"❌ Erro: Arquivo {SERVICE_ACCOUNT_FILE} não encontrado!")
-                exit(1)
             cred = credentials.Certificate(SERVICE_ACCOUNT_FILE)
             firebase_admin.initialize_app(cred, {'databaseURL': DATABASE_URL})
-            print("✅ Firebase Conectado.")
+            print("Firebase OK")
         except Exception as e:
-            print(f"❌ Erro Crítico Firebase: {e}")
+            print(f"Erro Firebase: {e}")
             exit(1)
 
-# =============================================================
-# 🛠️ DRIVER OTIMIZADO
-# =============================================================
 def start_driver():
     options = Options()
     options.page_load_strategy = 'eager'
-    options.add_argument("--headless=new") 
+    options.add_argument("--headless=new")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
     options.add_argument("--window-size=1920,1080")
-    options.add_argument("--log-level=3")
-    options.add_argument("--disable-extensions")
     options.add_argument("--mute-audio")
-    
-    # User-Agent Windows (mais comum)
+    options.add_argument("--disable-blink-features=AutomationControlled")
+    options.add_experimental_option("excludeSwitches", ["enable-automation", "enable-logging"])
+    options.add_experimental_option('useAutomationExtension', False)
     options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-    
-    # Caminho Fixo Square Cloud / Linux
     options.binary_location = "/usr/bin/chromium"
-    
     try:
         service = Service("/usr/bin/chromedriver")
-        return webdriver.Chrome(service=service, options=options)
+        driver = webdriver.Chrome(service=service, options=options)
+        # CDP stealth
+        driver.execute_cdp_cmd("Network.setUserAgentOverride", {"userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36"})
+        driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {"source": "Object.defineProperty(navigator, 'webdriver', {get: () => undefined});"})
+        return driver
     except Exception as e:
-        print(f"⚠️ Erro Crítico ao Iniciar Driver: {e}")
+        print(f"Erro driver: {e}")
         return None
 
-# =============================================================
-# 🔑 LOGIN ROBUSTO
-# =============================================================
 def process_login(driver, target_link):
-    print("🔑 Iniciando Login...")
     try:
         driver.get(URL_DO_SITE)
         sleep(5)
-        
-        botoes_fechar = [
-            "//button[contains(., 'Sim')]", 
-            "//button[contains(., 'Aceitar')]", 
-            "//button[contains(., 'Fechar')]",
-            "//div[@role='dialog']//button"
-        ]
-        
-        for xpath in botoes_fechar:
+        for xpath in ["//button[contains(., 'Sim')]", "//button[contains(., 'Aceitar')]", "//button[contains(., 'Fechar')]"]:
             try:
-                btns = driver.find_elements(By.XPATH, xpath)
-                for btn in btns:
+                for btn in driver.find_elements(By.XPATH, xpath):
                     if btn.is_displayed(): btn.click()
             except: pass
-
         WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Entrar')]"))).click()
         sleep(2)
         driver.find_element(By.NAME, "email").send_keys(EMAIL)
         driver.find_element(By.NAME, "password").send_keys(PASSWORD)
         driver.find_element(By.CSS_SELECTOR, "button[type='submit']").click()
-        print("✅ Login enviado.")
-        sleep(10) 
+        sleep(10)
     except Exception as e:
-        print(f"⚠️ Aviso Login: {e}")
-
-    print(f"🎮 Navegando: {target_link}")
+        print(f"Aviso login: {e}")
     driver.get(target_link)
     sleep(8)
-    
     try:
-        WebDriverWait(driver, 40).until(EC.presence_of_element_located((By.TAG_NAME, 'iframe')))
+        WebDriverWait(driver, 25).until(EC.presence_of_element_located((By.TAG_NAME, 'iframe')))
         return True
-    except Exception as e:
-        print(f"⚠️ iframe não encontrado: {e}")
-        return False
+    except: return False
 
-# =============================================================
-# 🎮 CAPTURA DE ELEMENTOS
-# =============================================================
 def get_game_elements(driver):
     try:
         driver.switch_to.default_content()
@@ -169,9 +113,7 @@ def get_game_elements(driver):
             EC.presence_of_element_located((By.CSS_SELECTOR, ".payouts-block, .payouts-wrapper, [appcoloredmultiplier]"))
         )
         return hist
-    except Exception as e:
-        print(f"⚠️ Erro busca histórico: {e}")
-        return None
+    except: return None
 
 def get_color_class(value):
     try:
@@ -182,139 +124,81 @@ def get_color_class(value):
     except: pass
     return "default-bg"
 
-# =============================================================
-# 🤖 LOOP DA THREAD
-# =============================================================
 def run_bot_thread(config):
     nome = config['nome']
     link = config['link']
     path_fb = config['firebase_path']
-    
+    last_sent = None
     while True:
         driver = None
         try:
-            print(f"🔄 [{nome}] Iniciando...")
+            print(f"[{nome}] Iniciando...")
             driver = start_driver()
             if not driver: 
-                sleep(10)
-                continue
-
+                sleep(10); continue
             if not process_login(driver, link):
-                print(f"⚠️ [{nome}] Falha no Login/Nav. Reiniciando...")
-                driver.quit()
-                sleep(5)
-                continue
-
+                driver.quit(); sleep(5); continue
             hist_el = get_game_elements(driver)
-            
             if not hist_el:
-                print(f"⚠️ [{nome}] Falha ao encontrar histórico. Reiniciando...")
-                if driver: driver.quit()
-                continue
-
-            print(f"✅ [{nome}] Monitorando Ativo.")
-            
-            last_val = None
+                driver.quit(); continue
+            print(f"[{nome}] Monitorando...")
             inactivity_timer = time()
-
             while True:
-                # ⏰ REINÍCIO 23:59
                 now = datetime.now(TZ_BR)
                 if now.hour == 23 and now.minute == 59:
-                    print(f"🌙 [{nome}] Reinício Diário (23:59)...")
-                    break 
-
-                # ⚠️ Timeout de Inatividade (6 min)
-                if (time() - inactivity_timer) > 360:
-                    print(f"⚠️ [{nome}] Sem dados novos há 6min. Reiniciando Driver...")
                     break
-
+                if (time() - inactivity_timer) > 360:
+                    break
                 try:
                     try:
-                        first_payout = hist_el.find_element(By.CSS_SELECTOR, "[appcoloredmultiplier].payout:first-child, .payout:first-child, .bubble-multiplier:first-child")
-                        raw = first_payout.get_attribute("innerText")
-                    except:
-                        raw = None
-                    
+                        raw = driver.execute_script("return arguments[0].querySelector('[appcoloredmultiplier].payout:first-child, .payout:first-child').innerText", hist_el)
+                    except: raw = None
                     if raw:
-                        # -----------------------------------------------------------
-                        # 🔥 CORREÇÃO AQUI: Remove vírgulas para velas > 1000x
-                        # Ex: "1,540.20x" vira "1540.20"
-                        # -----------------------------------------------------------
                         clean = raw.strip().lower().replace('x', '').replace(',', '')
-                        
                         if clean:
                             try:
-                                # Tenta converter para float
-                                val_float = float(clean)
-                                
-                                # Usa o valor limpo para comparação
-                                newest = clean 
-                                
-                                if newest != last_val:
-                                    inactivity_timer = time()
-                                    last_val = newest
-                                    
+                                val = float(clean)
+                                if val != last_sent:
+                                    last_sent = val
                                     now_save = datetime.now(TZ_BR)
-                                    key = now_save.strftime("%Y-%m-%d_%H-%M-%S")
-                                    
+                                    key = now_save.strftime("%Y-%m-%d_%H-%M-%S-%f").replace('.', '-')
                                     data = {
-                                        "multiplier": f"{val_float:.2f}",
+                                        "multiplier": f"{val:.2f}",
                                         "time": now_save.strftime("%H:%M:%S"),
-                                        "color": get_color_class(val_float),
+                                        "color": get_color_class(val),
                                         "date": now_save.strftime("%Y-%m-%d")
                                     }
-                                    
                                     db.reference(f"{path_fb}/{key}").set(data)
-                                    print(f"🔥 [{nome}] {data['multiplier']}x")
-                                    
-                            except ValueError:
-                                print(f"⚠️ [{nome}] Erro de formato no valor: '{raw}'")
-                                pass 
-
+                                    print(f"[{nome}] {data['multiplier']}x")
+                                    inactivity_timer = time()
+                            except: pass
                     sleep(1)
-
                 except (StaleElementReferenceException, NoSuchElementException):
                     hist_el = get_game_elements(driver)
                     if not hist_el: break
-
         except Exception as e:
-            print(f"❌ [{nome}] Erro Geral: {e}")
+            print(f"[{nome}] Erro: {e}")
             sleep(5)
-        
         finally:
-            if driver:
+            if driver: 
                 try: driver.quit()
                 except: pass
             gc.collect()
-            print(f"💤 [{nome}] Reiniciando ciclo em 10s...")
             sleep(10)
 
-# =============================================================
-# 🚀 EXECUÇÃO PRINCIPAL
-# =============================================================
 if __name__ == "__main__":
     run_diagnostics()
-    
     if not EMAIL or not PASSWORD:
-        print("⛔ Configure EMAIL e PASSWORD nas Variáveis de Ambiente!")
+        print("Configure EMAIL e PASSWORD!")
     else:
         init_firebase()
         threads = []
-        
-        # Mostra quantos bots estão ativos
-        print(f"🚀 Iniciando {len(CONFIG_BOTS)} Bots com LARGADA ESCALONADA...")
-        
+        print(f"Iniciando {len(CONFIG_BOTS)} bots...")
         for i, cfg in enumerate(CONFIG_BOTS):
             t = threading.Thread(target=run_bot_thread, args=(cfg,))
             t.start()
             threads.append(t)
-            
-            # Só aguarda se tiver mais bots na fila
             if i < len(CONFIG_BOTS) - 1:
-                print(f"⏳ Aguardando 40s para iniciar o próximo bot...")
                 sleep(40)
-            
         for t in threads:
             t.join()
-        
