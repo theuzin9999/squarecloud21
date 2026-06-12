@@ -9,39 +9,23 @@ import subprocess
 import traceback
 from time import sleep, time
 from datetime import datetime
-from seleniumwire import webdriver
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.chrome.options import Options
+
+# Imports do Selenium base (para buscas e esperas)
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
-from selenium.common.exceptions import StaleElementReferenceException, WebDriverException, NoSuchElementException, TimeoutException
-from webdriver_manager.chrome import ChromeDriverManager
+
+# 🔥 NOVA BIBLIOTECA ANTI-DETECÇÃO
+import undetected_chromedriver as uc
+
 import firebase_admin
 from firebase_admin import credentials, db
-import requests
 
-proxy = "http://wvoaugfr:5cmo0nzjqnqa@104.239.107.47:5699"
-
-r = requests.get(
-    "https://api.ipify.org",
-    proxies={
-        "http": proxy,
-        "https": proxy
-    },
-    timeout=20
-)
-
-print("IP PROXY:", r.text)
 # =============================================================
 # ⚠️ CONTROLE GLOBAL DE THREADS E DRIVER
 # =============================================================
 DRIVER_LOCK = threading.Lock() 
-STOP_EVENT = threading.Event() # Evento para sinalizar reinício geral
-
-# Silenciar logs desnecessários do WebDriver Manager
-logging.getLogger('WDM').setLevel(logging.ERROR)
-os.environ['WDM_LOG_LEVEL'] = '0'
+STOP_EVENT = threading.Event() 
 
 # =============================================================
 # 🔥 CONFIGURAÇÃO FIREBASE
@@ -71,370 +55,8 @@ FIREBASE_PATH_2 = "aviator2"
 EMAIL = os.getenv("EMAIL")
 PASSWORD = os.getenv("PASSWORD")
 
-# 🔴 AJUSTE IMPORTANTE: Aumentado para 1.0s para evitar travamento do Chrome na troca de abas
 POLLING_INTERVAL = 1.0       
-TEMPO_MAX_INATIVIDADE = 360 # 6 MINUTOS
-TZ_BR = pytz.timezone("America/Sao_Paulo")
-
-# =============================================================
-# 🔧 FUNÇÕES AUXILIARES
-# =============================================================
-def run_diagnostics():
-    print("\n--- 🕵️ DIAGNÓSTICO DE CONEXÃO ---")
-
-    try:
-        ip = requests.get(
-            "https://api.ipify.org",
-            timeout=10
-        ).text
-
-        print(f"🌐 IP Público: {ip}")
-
-        headers = {
-            "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/137.0.0.0 Safari/537.36"
-            )
-        }
-
-        res = requests.get(
-            URL_DO_SITE,
-            headers=headers,
-            timeout=15,
-            allow_redirects=True
-        )
-
-        print(f"📡 Status Site: {res.status_code}")
-        print(f"🖥️ Server: {res.headers.get('server')}")
-        print(f"☁️ CF-Ray: {res.headers.get('cf-ray')}")
-
-    except Exception as e:
-        print(f"⚠️ Alerta de Rede: {e}")
-
-    print("----------------------------------\n")
-
-def getColorClass(value):
-    try:
-        m = float(value)
-        if 1.0 <= m < 2.0: return "blue-bg"
-        if 2.0 <= m < 10.0: return "purple-bg"
-        if m >= 10.0: return "magenta-bg"
-        return "default-bg"
-    except: return "default-bg"
-
-def enviar_firebase_async(path, data):
-    def _send():
-        try:
-            db.reference(path).set(data)
-            nome_jogo = path.split('/')[0].upper()
-            if nome_jogo == "HISTORY": nome_jogo = "AVIATOR 1"
-            print(f"🔥 {nome_jogo}: {data['multiplier']}x às {data['time']}")
-        except Exception:
-            pass 
-    threading.Thread(target=_send, daemon=True).start()
-
-def verificar_modais_bloqueio(driver):
-    try:
-        btn_18 = WebDriverWait(driver, 3).until(
-            EC.element_to_be_clickable((By.XPATH, "//span[contains(., 'Sim, sou maior de 18')]"))
-        )
-        btn_18.click()
-        sleep(0.5)
-        print("✅ Modal 'Maior de 18' fechado.")
-    except: pass
-
-    try:
-        # Busca o botão exato de fechar do modal de cadastro usando os atributos fornecidos
-        xpath_btn_fechar = "//button[@data-slot='dialog-close' and contains(@class, 'goathbet-modal-close')]"
-        btn_fechar_cadastro = WebDriverWait(driver, 3).until(
-            EC.element_to_be_clickable((By.XPATH, xpath_btn_fechar))
-        )
-        btn_fechar_cadastro.click()
-        sleep(1.5) # Aguarda 1.5s para garantir que a animação do modal desapareceu da tela
-        print("✅ Modal 'Novo Cadastro' fechado.")
-    except: pass
-
-    botoes = ["//button[contains(., 'Sim')]", "//button[contains(., 'Aceitar')]", "//button[contains(., 'Fechar')]"]
-    for xpath in botoes:
-        try:
-            btn = driver.find_element(By.XPATH, xpath)
-            if btn.is_displayed(): 
-                btn.click()
-                sleep(0.5)
-        except: pass
-
-# =============================================================
-# 🚀 DRIVER
-# =============================================================
-def initialize_driver_instance():
-    # Tenta matar processos antigos para liberar memória
-    try:
-        if os.name == 'nt': # Windows
-            subprocess.run("taskkill /f /im chromedriver.exe", shell=True, stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
-            subprocess.run("taskkill /f /im chrome.exe", shell=True, stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
-        else:
-            # Em Linux/Square Cloud, encerra apenas processos órfãos chromium do usuário de forma segura
-            subprocess.run("killall -9 chromium-browser chromium chromedriver 2>/dev/null", shell=True)
-    except: pass
-
-    options = webdriver.ChromeOptions()
-    options.page_load_strategy = 'eager'
-    options.add_argument("--headless=new")
-    options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
-    options.add_argument("--disable-popup-blocking")
-    options.add_argument("--remote-debugging-port=9222")
-    options.add_argument("--disable-gpu")
-    options.add_argument("--disable-software-rasterizer")
-    options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36")
-    
-    # Previne hibernação de abas em background no mesmo navegador
-    options.add_argument("--disable-background-timer-throttling")
-    options.add_argument("--disable-backgrounding-occluded-windows")
-    options.add_argument("--disable-renderer-backgrounding")
-
-    # Mapeia caminhos de ambiente Linux da Square Cloud / VPS para inicializar sem crashes
-    if os.path.exists("/usr/bin/chromium"):
-        options.binary_location = "/usr/bin/chromium"
-    elif os.path.exists("/usr/bin/chromium-browser"):
-        options.binary_location = "/usr/bin/chromium-browser"
-    
-    try:
-        if os.path.exists("/usr/bin/chromedriver"):
-            service = Service("/usr/bin/chromedriver")
-        else:
-            service = Service(ChromeDriverManager().install())
-        return webdriver.Chrome(service=service, options=options)
-    except Exception as e:
-        print(f"⚠️ Erro ao instalar driver, tentando padrão: {e}")
-        return webdriver.Chrome(options=options)
-
-def setup_tabs(driver):
-    print("➡️ Acessando site e configurando abas...")
-    try:
-
-        # TESTE DO IP USADO PELO CHROME
-        driver.get("https://api.ipify.org")
-        sleep(5)
-
-        print("================================")
-        print("IP CHROME:", driver.find_element(By.TAG_NAME, "body").text)
-        print("================================")
-
-        # AGORA ABRE A GOATHBET
-        driver.get(URL_DO_SITE)
-        sleep(5)
-
-        print("================================")
-        print("TÍTULO:", driver.title)
-        print("URL:", driver.current_url)
-        print("================================")
-
-        driver.save_screenshot("inicio.png")
-
-        with open("pagina.html", "w", encoding="utf-8") as f:
-            f.write(driver.page_source)
-
-        verificar_modais_bloqueio(driver)
-
-        WebDriverWait(driver, 10).until(
-            EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Entrar')]"))
-        ).click()
-        sleep(2)
-        driver.find_element(By.NAME, "email").send_keys(EMAIL)
-        driver.find_element(By.NAME, "password").send_keys(PASSWORD)
-        driver.find_element(By.CSS_SELECTOR, "button[type='submit']").click()
-        print("✅ Login enviado.")
-        sleep(10) 
-    except Exception as e:
-        print(f"⚠️ Aviso no login: {e}")
-
-    driver.get(LINK_AVIATOR_ORIGINAL)
-    sleep(5)
-    handle_original = driver.current_window_handle
-    print(f"✅ Aba Aviator 1 configurada.")
-
-    driver.execute_script("window.open('');")
-    handles = driver.window_handles
-    handle_aviator2 = [h for h in handles if h != handle_original][0]
-    
-    driver.switch_to.window(handle_aviator2)
-    driver.get(LINK_AVIATOR_2)
-    sleep(5)
-    print(f"✅ Aba Aviator 2 configurada.")
-    
-    driver.switch_to.window(handle_original) 
-    return {FIREBASE_PATH_ORIGINAL: handle_original, FIREBASE_PATH_2: handle_aviator2}
-
-# =============================================================
-# 🎮 BUSCA DE ELEMENTOS
-# =============================================================
-def find_game_elements_safe(driver):
-    try:
-        driver.implicitly_wait(2)
-        iframe = driver.find_element(By.XPATH, '//iframe[contains(@src, "spribe") or contains(@src, "aviator")]')
-        driver.switch_to.frame(iframe)
-        hist = driver.find_element(By.CSS_SELECTOR, "app-stats-widget, .payouts-block")
-        driver.implicitly_wait(10)
-        return iframe, hist
-    except:
-        driver.implicitly_wait(10)
-        return None, None
-
-# =============================================================
-# 🔄 LOOP DE CAPTURA
-# =============================================================
-def start_bot(driver, game_handle, firebase_path):
-    nome_log = "AVIATOR 1" if "history" in firebase_path else "AVIATOR 2"
-    print(f"🚀 INICIADO: {nome_log}")
-    
-    LAST_SENT = None
-    ULTIMO_MULTIPLIER_TIME = time()
-
-    while not STOP_EVENT.is_set():
-        raw_text = None
-        with DRIVER_LOCK:
-            if STOP_EVENT.is_set(): break
-            try:
-                driver.switch_to.window(game_handle)
-                driver.switch_to.default_content()
-                iframe, hist_element = find_game_elements_safe(driver)
-                
-                if hist_element:
-                    first_payout = hist_element.find_element(
-                        By.CSS_SELECTOR, 
-                        "[appcoloredmultiplier].payout:first-child, .payout:first-child, .bubble-multiplier:first-child"
-                    )
-                    raw_text = first_payout.get_attribute("innerText")
-            except: pass
-
-        if raw_text:
-            clean_text = raw_text.strip().lower().replace('x', '').replace('\n', '').strip()
-            if clean_text:
-                try:
-                    novo_valor = float(clean_text)
-                    if novo_valor != LAST_SENT:
-                        now_br = datetime.now(TZ_BR)
-                        payload = {
-                            "multiplier": f"{novo_valor:.2f}",
-                            "time": now_br.strftime("%H:%M:%S"),
-                            "color": getColorClass(novo_valor),
-                            "date": now_br.strftime("%Y-%m-%d")
-                        }
-                        # Chave única para o banco de dados
-                        chave_firebase = now_br.strftime('%Y-%m-%d_%H-%M-%S-%f')[:-3]
-                        enviar_firebase_async(f"{firebase_path}/{chave_firebase}", payload)
-                        
-                        LAST_SENT = novo_valor
-                        ULTIMO_MULTIPLIER_TIME = time()
-                except: pass 
-
-        if (time() - ULTIMO_MULTIPLIER_TIME) > TEMPO_MAX_INATIVIDADE:
-            print(f"⚠️ [{nome_log}] Sem dados por mais de {TEMPO_MAX_INATIVIDADE}s. Reiniciando...")
-            STOP_EVENT.set()
-            return 
-            
-        sleep(POLLING_INTERVAL)
-
-# =============================================================
-# 🚀 SUPERVISOR (MAIN LOOP)
-# =============================================================
-def rodar_ciclo_monitoramento():
-    DRIVER = None
-    STOP_EVENT.clear() 
-    
-    try:
-        print("\n🔵 INICIANDO NOVO CICLO DO NAVEGADOR...")
-        DRIVER = initialize_driver_instance()
-        if not DRIVER:
-            print("⚠️ Falha ao instanciar o driver. Aguardando para nova tentativa...")
-            sleep(10)
-            return
-
-        handles = setup_tabs(DRIVER)
-        
-        handle_original = handles[FIREBASE_PATH_ORIGINAL]
-        handle_aviator2 = handles[FIREBASE_PATH_2]
-
-        print("⏳ Monitoramento iniciado (Threads)...")
-        
-        t1 = threading.Thread(target=start_bot, args=(DRIVER, handle_original, FIREBASE_PATH_ORIGINAL), daemon=True)
-        t2 = threading.Thread(target=start_bot, args=(DRIVER, handle_aviator2, FIREBASE_PATH_2), daemon=True)
-
-        t1.start()
-        t2.start()
-
-        while t1.is_alive() or t2.is_alive():
-            if STOP_EVENT.is_set():
-                break
-            sleep(2)
-            
-        print("🛑 Ciclo encerrado. Limpando recursos...")
-        
-    except Exception as e:
-        print(f"\n❌ ERRO NO CICLO: {e}")
-        traceback.print_exc()
-    finally:
-        STOP_EVENT.set() 
-        if DRIVER:
-            try:
-                DRIVER.quit()
-                print("🗑️ Driver encerrado com sucesso.")
-            except: pass
-        gc.collect()
-        sleep(5) 
-
-if __name__ == "__main__":
-    # Executa o diagnóstico de rede logo ao iniciar
-    run_diagnostics()
-    
-    if not EMAIL or not PASSWORD:
-        print("❗ Configure EMAIL e PASSWORD nas variáveis de ambiente.")
-        sys.exit()
-    
-    print("==============================================")
-    print("      SUPERVISOR DE BOT INICIADO (24H)       ")
-    print("==============================================")
-
-    while True:
-        try:
-            rodar_ciclo_monitoramento()
-            print("♻️ Reiniciando processo em 5 segundos...\n")
-            sleep(5)
-        except KeyboardInterrupt:
-            print("\n🚫 Parada manual pelo usuário.")
-            break
-        except Exception as e:
-            print(f"❌ Erro crítico no Supervisor: {e}")
-            sleep(10)
-DATABASE_URL = 'https://history-dashboard-a70ee-default-rtdb.firebaseio.com'
-
-try:
-    if not firebase_admin._apps:
-        cred = credentials.Certificate(SERVICE_ACCOUNT_FILE)
-        firebase_admin.initialize_app(cred, {'databaseURL': DATABASE_URL})
-    print("✅ Firebase Admin SDK inicializado.")
-except Exception as e:
-    print(f"\n❌ ERRO CONEXÃO FIREBASE: {e}")
-    sys.exit()
-
-# =============================================================
-# ⚙️ VARIÁVEIS 
-# =============================================================
-URL_DO_SITE = "https://www.goathbet.com"
-
-LINK_AVIATOR_ORIGINAL = "https://www.goathbet.com/pt/casino/spribe/aviator"
-LINK_AVIATOR_2 = "https://www.goathbet.com/casino/spribe/aviator-vip"
-FIREBASE_PATH_ORIGINAL = "history"
-FIREBASE_PATH_2 = "aviator2"
-
-EMAIL = os.getenv("EMAIL")
-PASSWORD = os.getenv("PASSWORD")
-
-# 🔴 AJUSTE IMPORTANTE: Aumentado para 1.0s para evitar travamento do Chrome na troca de abas
-POLLING_INTERVAL = 1.0       
-TEMPO_MAX_INATIVIDADE = 360 # 6 MINUTOS
+TEMPO_MAX_INATIVIDADE = 360 
 TZ_BR = pytz.timezone("America/Sao_Paulo")
 
 # =============================================================
@@ -445,8 +67,8 @@ def run_diagnostics():
     try:
         ip = requests.get('https://api.ipify.org', timeout=10).text
         print(f"🌐 IP Público: {ip}")
-        res = requests.get(URL_DO_SITE, timeout=10)
-        print(f"📡 Status Site: {res.status_code}")
+        res = requests.get(URL_DO_SITE, timeout=10, headers={'User-Agent': 'Mozilla/5.0'})
+        print(f"📡 Status Site (Requests normal): {res.status_code}")
     except Exception as e:
         print(f"⚠️ Alerta de Rede: {e}")
     print("----------------------------------\n")
@@ -482,13 +104,12 @@ def verificar_modais_bloqueio(driver):
     except: pass
 
     try:
-        # Busca o botão exato de fechar do modal de cadastro usando os atributos fornecidos
         xpath_btn_fechar = "//button[@data-slot='dialog-close' and contains(@class, 'goathbet-modal-close')]"
         btn_fechar_cadastro = WebDriverWait(driver, 3).until(
             EC.element_to_be_clickable((By.XPATH, xpath_btn_fechar))
         )
         btn_fechar_cadastro.click()
-        sleep(1.5) # Aguarda 1.5s para garantir que a animação do modal desapareceu da tela
+        sleep(1.5) 
         print("✅ Modal 'Novo Cadastro' fechado.")
     except: pass
 
@@ -502,56 +123,48 @@ def verificar_modais_bloqueio(driver):
         except: pass
 
 # =============================================================
-# 🚀 DRIVER
+# 🚀 DRIVER UNDETECTED (ANTI-CLOUDFLARE)
 # =============================================================
 def initialize_driver_instance():
-    # Tenta matar processos antigos para liberar memória
     try:
-        if os.name == 'nt': # Windows
+        if os.name == 'nt': 
             subprocess.run("taskkill /f /im chromedriver.exe", shell=True, stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
             subprocess.run("taskkill /f /im chrome.exe", shell=True, stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
         else:
-            # Em Linux/Square Cloud, encerra apenas processos órfãos chromium do usuário de forma segura
             subprocess.run("killall -9 chromium-browser chromium chromedriver 2>/dev/null", shell=True)
     except: pass
 
-    options = webdriver.ChromeOptions()
+    options = uc.ChromeOptions()
     options.page_load_strategy = 'eager'
-    options.add_argument("--headless=new")
+    
+    # Flags de otimização de memória para a Square Cloud
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-popup-blocking")
-    options.add_argument("--remote-debugging-port=9222")
     options.add_argument("--disable-gpu")
     options.add_argument("--disable-software-rasterizer")
-    options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36")
     
-    # Previne hibernação de abas em background no mesmo navegador
-    options.add_argument("--disable-background-timer-throttling")
-    options.add_argument("--disable-backgrounding-occluded-windows")
-    options.add_argument("--disable-renderer-backgrounding")
-
-    # Mapeia caminhos de ambiente Linux da Square Cloud / VPS para inicializar sem crashes
+    # Identifica o caminho do navegador no servidor Linux
     if os.path.exists("/usr/bin/chromium"):
         options.binary_location = "/usr/bin/chromium"
     elif os.path.exists("/usr/bin/chromium-browser"):
         options.binary_location = "/usr/bin/chromium-browser"
-    
+
     try:
-        if os.path.exists("/usr/bin/chromedriver"):
-            service = Service("/usr/bin/chromedriver")
-        else:
-            service = Service(ChromeDriverManager().install())
-        return webdriver.Chrome(service=service, options=options)
+        # A flag headless no 'uc' é passada diretamente no construtor.
+        # Estamos ativando para que funcione no servidor sem tela (Square Cloud).
+        driver = uc.Chrome(options=options, headless=True)
+        return driver
     except Exception as e:
-        print(f"⚠️ Erro ao instalar driver, tentando padrão: {e}")
-        return webdriver.Chrome(options=options)
+        print(f"⚠️ Erro crítico ao iniciar o Undetected Chromedriver: {e}")
+        return None
 
 def setup_tabs(driver):
-    print("➡️ Acessando site e configurando abas...")
+    print("➡️ Acessando site e configurando abas com Anti-Detecção...")
     try:
         driver.get(URL_DO_SITE)
-        sleep(5)
+        # Esperar um pouco mais na primeira carga caso caia na tela do Cloudflare
+        sleep(10)
         verificar_modais_bloqueio(driver)
 
         WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Entrar')]"))).click()
@@ -636,7 +249,6 @@ def start_bot(driver, game_handle, firebase_path):
                             "color": getColorClass(novo_valor),
                             "date": now_br.strftime("%Y-%m-%d")
                         }
-                        # Chave única para o banco de dados
                         chave_firebase = now_br.strftime('%Y-%m-%d_%H-%M-%S-%f')[:-3]
                         enviar_firebase_async(f"{firebase_path}/{chave_firebase}", payload)
                         
@@ -659,8 +271,9 @@ def rodar_ciclo_monitoramento():
     STOP_EVENT.clear() 
     
     try:
-        print("\n🔵 INICIANDO NOVO CICLO DO NAVEGADOR...")
+        print("\n🔵 INICIANDO NOVO CICLO COM ANTI-DETECÇÃO...")
         DRIVER = initialize_driver_instance()
+        
         if not DRIVER:
             print("⚠️ Falha ao instanciar o driver. Aguardando para nova tentativa...")
             sleep(10)
@@ -700,7 +313,6 @@ def rodar_ciclo_monitoramento():
         sleep(5) 
 
 if __name__ == "__main__":
-    # Executa o diagnóstico de rede logo ao iniciar
     run_diagnostics()
     
     if not EMAIL or not PASSWORD:
