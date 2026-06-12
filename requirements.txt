@@ -1,5 +1,6 @@
 selenium
-undetected-chromedriver
+webdriver-manager
+selenium-stealth
 firebase-admin
 pytz
 requests
