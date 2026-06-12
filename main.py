@@ -10,13 +10,16 @@ import traceback
 from time import sleep, time
 from datetime import datetime
 
-# Imports do Selenium base (para buscas e esperas)
+from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
+from webdriver_manager.chrome import ChromeDriverManager
 
-# 🔥 NOVA BIBLIOTECA ANTI-DETECÇÃO
-import undetected_chromedriver as uc
+# 🔥 NOVA BIBLIOTECA DE CAMUFLAGEM
+from selenium_stealth import stealth
 
 import firebase_admin
 from firebase_admin import credentials, db
@@ -26,6 +29,9 @@ from firebase_admin import credentials, db
 # =============================================================
 DRIVER_LOCK = threading.Lock() 
 STOP_EVENT = threading.Event() 
+
+logging.getLogger('WDM').setLevel(logging.ERROR)
+os.environ['WDM_LOG_LEVEL'] = '0'
 
 # =============================================================
 # 🔥 CONFIGURAÇÃO FIREBASE
@@ -123,7 +129,7 @@ def verificar_modais_bloqueio(driver):
         except: pass
 
 # =============================================================
-# 🚀 DRIVER UNDETECTED (ANTI-CLOUDFLARE)
+# 🚀 DRIVER COM SELENIUM-STEALTH
 # =============================================================
 def initialize_driver_instance():
     try:
@@ -134,37 +140,51 @@ def initialize_driver_instance():
             subprocess.run("killall -9 chromium-browser chromium chromedriver 2>/dev/null", shell=True)
     except: pass
 
-    options = uc.ChromeOptions()
+    options = webdriver.ChromeOptions()
     options.page_load_strategy = 'eager'
     
-    # Flags de otimização de memória para a Square Cloud
+    # Obrigatório para servidores
+    options.add_argument("--headless=new")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-popup-blocking")
-    options.add_argument("--disable-gpu")
-    options.add_argument("--disable-software-rasterizer")
     
-    # Identifica o caminho do navegador no servidor Linux
+    # Flags de remoção de marca de automação do Selenium base
+    options.add_argument("--disable-blink-features=AutomationControlled")
+    options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    options.add_experimental_option('useAutomationExtension', False)
+
     if os.path.exists("/usr/bin/chromium"):
         options.binary_location = "/usr/bin/chromium"
     elif os.path.exists("/usr/bin/chromium-browser"):
         options.binary_location = "/usr/bin/chromium-browser"
 
     try:
-        # A flag headless no 'uc' é passada diretamente no construtor.
-        # Estamos ativando para que funcione no servidor sem tela (Square Cloud).
-        driver = uc.Chrome(options=options, headless=True)
+        if os.path.exists("/usr/bin/chromedriver"):
+            service = Service("/usr/bin/chromedriver")
+        else:
+            service = Service(ChromeDriverManager().install())
+        driver = webdriver.Chrome(service=service, options=options)
+        
+        # 🔥 APLICANDO A CAMUFLAGEM STEALTH 🔥
+        stealth(driver,
+            languages=["pt-BR", "pt"],
+            vendor="Google Inc.",
+            platform="Win32", # Simula que estamos no Windows e não num servidor Linux
+            webgl_vendor="Intel Inc.",
+            renderer="Intel Iris OpenGL Engine",
+            fix_hairline=True,
+        )
         return driver
     except Exception as e:
-        print(f"⚠️ Erro crítico ao iniciar o Undetected Chromedriver: {e}")
+        print(f"⚠️ Erro ao instalar driver: {e}")
         return None
 
 def setup_tabs(driver):
-    print("➡️ Acessando site e configurando abas com Anti-Detecção...")
+    print("➡️ Acessando site e configurando abas com Anti-Detecção Stealth...")
     try:
         driver.get(URL_DO_SITE)
-        # Esperar um pouco mais na primeira carga caso caia na tela do Cloudflare
-        sleep(10)
+        sleep(8) # Aguarda validação do Cloudflare/Akamai
         verificar_modais_bloqueio(driver)
 
         WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Entrar')]"))).click()
@@ -271,7 +291,7 @@ def rodar_ciclo_monitoramento():
     STOP_EVENT.clear() 
     
     try:
-        print("\n🔵 INICIANDO NOVO CICLO COM ANTI-DETECÇÃO...")
+        print("\n🔵 INICIANDO NOVO CICLO COM STEALTH...")
         DRIVER = initialize_driver_instance()
         
         if not DRIVER:
