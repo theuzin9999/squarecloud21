@@ -4,4 +4,3 @@ selenium-stealth
 firebase-admin
 pytz
 requests
-selenium-wire
