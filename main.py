@@ -10,15 +10,12 @@ import traceback
 from time import sleep, time
 from datetime import datetime
 
-from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
-from webdriver_manager.chrome import ChromeDriverManager
 
 # 🔥 NOVA BIBLIOTECA DE CAMUFLAGEM
+import undetected_chromedriver as uc
 from selenium_stealth import stealth
 
 import firebase_admin
@@ -30,14 +27,12 @@ from firebase_admin import credentials, db
 DRIVER_LOCK = threading.Lock() 
 STOP_EVENT = threading.Event() 
 
-logging.getLogger('WDM').setLevel(logging.ERROR)
-os.environ['WDM_LOG_LEVEL'] = '0'
-
 # =============================================================
 # 🔥 CONFIGURAÇÃO FIREBASE
 # =============================================================
 SERVICE_ACCOUNT_FILE = 'serviceAccountKey.json'
-DATABASE_URL = 'https://history-dashboard-a70ee-default-rtdb.firebaseio.com'
+# Substitua pela sua URL real do Firebase
+DATABASE_URL = 'https://your-database.firebaseio.com'
 
 try:
     if not firebase_admin._apps:
@@ -51,10 +46,11 @@ except Exception as e:
 # =============================================================
 # ⚙️ VARIÁVEIS 
 # =============================================================
-URL_DO_SITE = "https://www.goathbet.com"
+# Substitua pelos seus links reais
+URL_DO_SITE = "https://www.example.com"
+LINK_AVIATOR_ORIGINAL = "https://www.example.com/pt/casino/spribe/aviator"
+LINK_AVIATOR_2 = "https://www.example.com/casino/spribe/aviator-vip"
 
-LINK_AVIATOR_ORIGINAL = "https://www.goathbet.com/pt/casino/spribe/aviator"
-LINK_AVIATOR_2 = "https://www.goathbet.com/casino/spribe/aviator-vip"
 FIREBASE_PATH_ORIGINAL = "history"
 FIREBASE_PATH_2 = "aviator2"
 
@@ -110,7 +106,7 @@ def verificar_modais_bloqueio(driver):
     except: pass
 
     try:
-        xpath_btn_fechar = "//button[@data-slot='dialog-close' and contains(@class, 'goathbet-modal-close')]"
+        xpath_btn_fechar = "//button[@data-slot='dialog-close' and contains(@class, 'modal-close')]"
         btn_fechar_cadastro = WebDriverWait(driver, 3).until(
             EC.element_to_be_clickable((By.XPATH, xpath_btn_fechar))
         )
@@ -128,8 +124,22 @@ def verificar_modais_bloqueio(driver):
                 sleep(0.5)
         except: pass
 
+def stealth_script_inject(driver):
+    """Injeta script adicional para mascarar o Selenium"""
+    stealth_js = """
+    Object.defineProperty(navigator, 'webdriver', {
+      get: () => false,
+    });
+    """
+    try:
+        driver.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument', {
+            'source': stealth_js
+        })
+    except Exception as e:
+        print(f"Aviso ao injetar stealth script: {e}")
+
 # =============================================================
-# 🚀 DRIVER COM SELENIUM-STEALTH
+# 🚀 DRIVER COM UNDETECTED-CHROMEDRIVER
 # =============================================================
 def initialize_driver_instance():
     try:
@@ -140,7 +150,7 @@ def initialize_driver_instance():
             subprocess.run("killall -9 chromium-browser chromium chromedriver 2>/dev/null", shell=True)
     except: pass
 
-    options = webdriver.ChromeOptions()
+    options = uc.ChromeOptions()
     options.page_load_strategy = 'eager'
     
     # Obrigatório para servidores
@@ -149,42 +159,36 @@ def initialize_driver_instance():
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-popup-blocking")
     
-    # Flags de remoção de marca de automação do Selenium base
+    # ✅ Novas configurações de camuflagem
+    options.add_argument("--window-size=1920,1080")
+    options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
     options.add_argument("--disable-blink-features=AutomationControlled")
-    options.add_experimental_option("excludeSwitches", ["enable-automation"])
-    options.add_experimental_option('useAutomationExtension', False)
-
-    if os.path.exists("/usr/bin/chromium"):
-        options.binary_location = "/usr/bin/chromium"
-    elif os.path.exists("/usr/bin/chromium-browser"):
-        options.binary_location = "/usr/bin/chromium-browser"
 
     try:
-        if os.path.exists("/usr/bin/chromedriver"):
-            service = Service("/usr/bin/chromedriver")
-        else:
-            service = Service(ChromeDriverManager().install())
-        driver = webdriver.Chrome(service=service, options=options)
+        # Inicializa usando undetected_chromedriver
+        driver = uc.Chrome(options=options)
         
-        # 🔥 APLICANDO A CAMUFLAGEM STEALTH 🔥
+        # Mantendo o selenium-stealth como camada extra de proteção
         stealth(driver,
             languages=["pt-BR", "pt"],
             vendor="Google Inc.",
-            platform="Win32", # Simula que estamos no Windows e não num servidor Linux
+            platform="Win32", # Simula que estamos no Windows
             webgl_vendor="Intel Inc.",
             renderer="Intel Iris OpenGL Engine",
             fix_hairline=True,
         )
         return driver
     except Exception as e:
-        print(f"⚠️ Erro ao instalar driver: {e}")
+        print(f"⚠️ Erro ao instalar/iniciar driver: {e}")
         return None
 
 def setup_tabs(driver):
-    print("➡️ Acessando site e configurando abas com Anti-Detecção Stealth...")
+    stealth_script_inject(driver) # ✅ Injeção de script CDP adicionada
+    
+    print("➡️ Acessando site e configurando abas com Anti-Detecção UC...")
     try:
         driver.get(URL_DO_SITE)
-        sleep(8) # Aguarda validação do Cloudflare/Akamai
+        sleep(10) # Aguarda validação do Cloudflare
         verificar_modais_bloqueio(driver)
 
         WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Entrar')]"))).click()
@@ -291,7 +295,7 @@ def rodar_ciclo_monitoramento():
     STOP_EVENT.clear() 
     
     try:
-        print("\n🔵 INICIANDO NOVO CICLO COM STEALTH...")
+        print("\n🔵 INICIANDO NOVO CICLO COM UNDETECTED-CHROMEDRIVER...")
         DRIVER = initialize_driver_instance()
         
         if not DRIVER:
@@ -340,7 +344,7 @@ if __name__ == "__main__":
         sys.exit()
     
     print("==============================================")
-    print("      SUPERVISOR DE BOT INICIADO (24H)       ")
+    print("     SUPERVISOR DE BOT INICIADO (24H)        ")
     print("==============================================")
 
     while True:
