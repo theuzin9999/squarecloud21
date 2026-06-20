@@ -46,7 +46,7 @@ except Exception as e:
 # =============================================================
 # ⚙️ VARIÁVEIS 
 # =============================================================
-URL_DO_SITE = "https://www.example.com"
+URL_DO_SITE = "https://go.goathbet.com/c/7vo"
 
 FIREBASE_PATH_ORIGINAL = "history"
 FIREBASE_PATH_2 = "aviator2"
