@@ -25,8 +25,8 @@ from firebase_admin import credentials, db
 # =============================================================
 # ⚠️ CONTROLE GLOBAL DE THREADS E DRIVER
 # =============================================================
-DRIVER_LOCK = threading.Lock()
-STOP_EVENT = threading.Event()
+DRIVER_LOCK = threading.Lock() 
+STOP_EVENT = threading.Event() 
 
 # =============================================================
 # 🔥 CONFIGURAÇÃO FIREBASE
@@ -46,9 +46,7 @@ except Exception as e:
 # =============================================================
 # ⚙️ VARIÁVEIS 
 # =============================================================
-URL_DO_SITE = "https://www.example.com"
-LINK_AVIATOR_ORIGINAL = "https://www.example.com/pt/casino/spribe/aviator"
-LINK_AVIATOR_2 = "https://www.example.com/casino/spribe/aviator-vip"
+URL_DO_SITE = "https://go.goathbet.com/c/7vo"
 
 FIREBASE_PATH_ORIGINAL = "history"
 FIREBASE_PATH_2 = "aviator2"
@@ -56,7 +54,7 @@ FIREBASE_PATH_2 = "aviator2"
 EMAIL = os.getenv("EMAIL")
 PASSWORD = os.getenv("PASSWORD")
 
-POLLING_INTERVAL = 1.0      
+POLLING_INTERVAL = 1.0       
 TEMPO_MAX_INATIVIDADE = 360 
 TZ_BR = pytz.timezone("America/Sao_Paulo")
 
@@ -68,15 +66,8 @@ def run_diagnostics():
     try:
         ip = requests.get('https://api.ipify.org', timeout=10).text
         print(f"🌐 IP Público: {ip}")
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8'
-        }
-        res = requests.get(URL_DO_SITE, timeout=12, headers=headers)
+        res = requests.get(URL_DO_SITE, timeout=10, headers={'User-Agent': 'Mozilla/5.0'})
         print(f"📡 Status Site (Requests normal): {res.status_code}")
-        if res.status_code == 429:
-            print("⚠️ Nota: IP com limitação de taxa (429). Aguardando amortecimento...")
-            sleep(5)
     except Exception as e:
         print(f"⚠️ Alerta de Rede: {e}")
     print("----------------------------------\n")
@@ -115,35 +106,28 @@ def enviar_firebase_async(path, data):
     threading.Thread(target=_send, daemon=True).start()
 
 def verificar_modais_bloqueio(driver):
-    """Fecha ativamente modais conhecidos que impedem o clique em elementos traseiros"""
+    """Fecha ativamente modais conhecidos baseados nas tags HTML fornecidas"""
+    # 1. Fechar modal de 18 Anos se estiver visível
     try:
         btn_18 = WebDriverWait(driver, 5).until(
-            EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Sim, sou maior de 18')] | //span[contains(., 'Sim, sou maior de 18')]"))
+            EC.element_to_be_clickable((By.XPATH, "//span[contains(text(), 'Sim, sou maior de 18')]"))
         )
         btn_18.click()
         sleep(1.5)
-        print("✅ Modal 'Maior de 18' fechado com sucesso.")
+        print("✅ Modal 'Maior de 18' fechado.")
     except: pass
 
+    # 2. Fechar modal de Novo Cadastro usando o X (SVG) para evitar confusão de inputs
     try:
-        xpath_btn_fechar = "//button[@data-slot='dialog-close' and contains(@class, 'modal-close')] | //button[contains(@class, 'close')]"
-        btn_fechar_cadastro = driver.find_element(By.XPATH, xpath_btn_fechar)
+        btn_fechar_cadastro = driver.find_element(By.XPATH, "//button[@data-slot='dialog-close']//*[local-name()='svg'] | //button[contains(@class, 'modal-close')]")
         if btn_fechar_cadastro.is_displayed():
             btn_fechar_cadastro.click()
             sleep(1.5)
-            print("✅ Modal secundário/cadastro fechado.")
+            print("✅ Modal 'Novo Cadastro' fechado para desobstrução.")
     except: pass
 
-    botoes = ["//button[contains(., 'Sim')]", "//*[@id='close-modal']", "//button[contains(., 'Aceitar')]"]
-    for xpath in botoes:
-        try:
-            btn = driver.find_element(By.XPATH, xpath)
-            if btn.is_displayed():
-                btn.click()
-                sleep(0.5)
-        except: pass
-
 def stealth_script_inject(driver):
+    """Injeta script adicional para mascarar o Selenium"""
     stealth_js = """
     Object.defineProperty(navigator, 'webdriver', {
       get: () => false,
@@ -161,7 +145,7 @@ def stealth_script_inject(driver):
 # =============================================================
 def initialize_driver_instance():
     try:
-        if os.name == 'nt':
+        if os.name == 'nt': 
             subprocess.run("taskkill /f /im chromedriver.exe", shell=True, stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
             subprocess.run("taskkill /f /im chrome.exe", shell=True, stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
         else:
@@ -181,7 +165,7 @@ def initialize_driver_instance():
     options.add_argument("--disable-blink-features=AutomationControlled")
 
     try:
-        driver = uc.Chrome(options=options, version_main=148)
+        driver = uc.Chrome(options=options)
         
         stealth(driver,
             languages=["pt-BR", "pt"],
@@ -202,52 +186,71 @@ def setup_tabs(driver):
     print("➡️ Acessando site e configurando abas com Anti-Detecção UC...")
     try:
         driver.get(URL_DO_SITE)
-        sleep(10)
+        sleep(10) 
         
+        # Remove os modais da frente antes de prosseguir
         verificar_modais_bloqueio(driver)
 
+        # Clica no botão Entrar usando a classe estrutural precisa obtida do HTML
         botao_entrar = WebDriverWait(driver, 15).until(
-            EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Entrar')]"))
+            EC.element_to_be_clickable((By.XPATH, "//button[@data-variant='ghost' and contains(., 'Entrar')]"))
         )
         botao_entrar.click()
         sleep(3)
         
-        driver.find_element(By.NAME, "email").send_keys(EMAIL)
-        driver.find_element(By.NAME, "password").send_keys(PASSWORD)
+        # Alvos explícitos usando ID para ignorar os inputs fantasmas do modal de cadastro secundário
+        input_email = WebDriverWait(driver, 10).until(EC.visibility_of_element_located((By.ID, "email")))
+        input_email.send_keys(EMAIL)
+        
+        input_pass = driver.find_element(By.ID, "password")
+        input_pass.send_keys(PASSWORD)
+        
         driver.find_element(By.CSS_SELECTOR, "button[type='submit']").click()
-        print("✅ Dados de login submetidos.")
+        print("✅ Formulário de login enviado.")
         sleep(12) 
     except Exception as e:
         print(f"❌ ERRO CRÍTICO NAS ETAPAS DE LOGIN: {e}")
         try:
             driver.save_screenshot("erro_login.png")
-            print("📸 Print da falha de login gerado em 'erro_login.png'.")
         except: pass
         return None
 
     try:
-        driver.get(LINK_AVIATOR_ORIGINAL)
+        # Acessa o Aviator 1 clicando no Card dinâmico via atributo ALT da imagem
+        card_aviator1 = WebDriverWait(driver, 15).until(
+            EC.element_to_be_clickable((By.XPATH, "//img[@alt='Aviator']"))
+        )
+        card_aviator1.click()
         sleep(8) 
+        
         handle_original = driver.current_window_handle
         driver.save_screenshot("aviator1_inicial.png")
-        print("📸 Print inicial 'aviator1_inicial.png' gerado.")
+        print("📸 Print inicial 'aviator1_inicial.png' gerado com sucesso.")
         print(f"✅ Aba Aviator 1 configurada.")
 
+        # Abre uma nova aba, chaveia para ela e volta para a Home para coletar o Aviator VIP
         driver.execute_script("window.open('');")
         handles = driver.window_handles
         handle_aviator2 = [h for h in handles if h != handle_original][0]
         
         driver.switch_to.window(handle_aviator2)
-        driver.get(LINK_AVIATOR_2)
+        driver.get(URL_DO_SITE)
+        sleep(5)
+        
+        card_aviator2 = WebDriverWait(driver, 15).until(
+            EC.element_to_be_clickable((By.XPATH, "//img[@alt='Aviator VIP']"))
+        )
+        card_aviator2.click()
         sleep(8) 
+        
         driver.save_screenshot("aviator2_inicial.png")
-        print("📸 Print inicial 'aviator2_inicial.png' gerado.")
+        print("📸 Print inicial 'aviator2_inicial.png' gerado com sucesso.")
         print(f"✅ Aba Aviator 2 configurada.")
         
         driver.switch_to.window(handle_original)
         return {FIREBASE_PATH_ORIGINAL: handle_original, FIREBASE_PATH_2: handle_aviator2}
     except Exception as e:
-        print(f"⚠️ Falha ao abrir as páginas internas do jogo: {e}")
+        print(f"⚠️ Falha ao abrir as páginas internas do jogo por cliques: {e}")
         return None
 
 # =============================================================
@@ -315,7 +318,7 @@ def start_bot(driver, game_handle, firebase_path):
         if (time() - ULTIMO_MULTIPLIER_TIME) > TEMPO_MAX_INATIVIDADE:
             print(f"⚠️ [{nome_log}] Sem dados por mais de {TEMPO_MAX_INATIVIDADE}s. Reiniciando...")
             STOP_EVENT.set()
-            return
+            return 
             
         sleep(POLLING_INTERVAL)
 
@@ -324,7 +327,7 @@ def start_bot(driver, game_handle, firebase_path):
 # =============================================================
 def rodar_ciclo_monitoramento():
     DRIVER = None
-    STOP_EVENT.clear()
+    STOP_EVENT.clear() 
     
     limpar_pngs_antigos()
     
@@ -365,14 +368,14 @@ def rodar_ciclo_monitoramento():
         print(f"\n❌ ERRO NO CICLO: {e}")
         traceback.print_exc()
     finally:
-        STOP_EVENT.set()
+        STOP_EVENT.set() 
         if DRIVER:
             try:
                 DRIVER.quit()
                 print("🗑️ Driver encerrado com sucesso.")
             except: pass
         gc.collect()
-        sleep(5)
+        sleep(5) 
 
 if __name__ == "__main__":
     run_diagnostics()
@@ -396,4 +399,3 @@ if __name__ == "__main__":
         except Exception as e:
             print(f"❌ Erro crítico no Supervisor: {e}")
             sleep(10)
-            
