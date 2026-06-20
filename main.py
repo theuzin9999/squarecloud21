@@ -7,9 +7,6 @@ import gc
 import requests
 import subprocess
 import traceback
-import base64
-import socket
-import json
 from time import sleep, time
 from datetime import datetime
 
@@ -17,7 +14,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
 
-# 🔥 BIBLIOTECAS DE CAMUFLAGEM
+# 🔥 NOVA BIBLIOTECA DE CAMUFLAGEM
 import undetected_chromedriver as uc
 from selenium_stealth import stealth
 
@@ -34,7 +31,8 @@ STOP_EVENT = threading.Event()
 # 🔥 CONFIGURAÇÃO FIREBASE
 # =============================================================
 SERVICE_ACCOUNT_FILE = 'serviceAccountKey.json'
-DATABASE_URL = 'https://your-database.firebaseio.com' # Substitua pela sua URL real do Firebase
+# Substitua pela sua URL real do Firebase
+DATABASE_URL = 'https://your-database.firebaseio.com'
 
 try:
     if not firebase_admin._apps:
@@ -46,9 +44,10 @@ except Exception as e:
     sys.exit()
 
 # =============================================================
-# ⚙️ VARIÁVEIS DO SCRIPT
+# ⚙️ VARIÁVEIS 
 # =============================================================
-URL_DO_SITE = "https://www.example.com" # Substitua pelos seus links reais
+# Substitua pelos seus links reais
+URL_DO_SITE = "https://www.example.com"
 LINK_AVIATOR_ORIGINAL = "https://www.example.com/pt/casino/spribe/aviator"
 LINK_AVIATOR_2 = "https://www.example.com/casino/spribe/aviator-vip"
 
@@ -63,115 +62,17 @@ TEMPO_MAX_INATIVIDADE = 360
 TZ_BR = pytz.timezone("America/Sao_Paulo")
 
 # =============================================================
-# 📡 TUNEL DE PROXY LOCAL NATIVO (WEBSHARE)
-# =============================================================
-def start_local_proxy_tunnel(local_port, upstream_ip, upstream_port, user, password):
-    def tunnel(src, dst):
-        try:
-            while True:
-                data = src.recv(8192)
-                if not data:
-                    break
-                dst.sendall(data)
-        except:
-            pass
-        finally:
-            try: src.close()
-            except: pass
-            try: dst.close()
-            except: pass
-
-    def handle_client(client_socket):
-        try:
-            request = client_socket.recv(4048)
-            if not request:
-                client_socket.close()
-                return
-
-            if request.startswith(b'CONNECT'):
-                first_line = request.split(b'\r\n')[0].decode('utf-8', errors='ignore')
-                target = first_line.split(' ')[1]
-
-                upstream_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                upstream_socket.connect((upstream_ip, int(upstream_port)))
-
-                auth_str = f"{user}:{password}"
-                auth_b64 = base64.b64encode(auth_str.encode()).decode()
-
-                connect_req = f"CONNECT {target} HTTP/1.1\r\nProxy-Authorization: Basic {auth_b64}\r\n\r\n"
-                upstream_socket.sendall(connect_req.encode())
-
-                resp = upstream_socket.recv(4048)
-                if b"200" in resp or b"Established" in resp:
-                    client_socket.sendall(b"HTTP/1.1 200 Connection Established\r\n\r\n")
-                    threading.Thread(target=tunnel, args=(client_socket, upstream_socket), daemon=True).start()
-                    threading.Thread(target=tunnel, args=(upstream_socket, client_socket), daemon=True).start()
-                else:
-                    client_socket.close()
-                    upstream_socket.close()
-            else:
-                upstream_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                upstream_socket.connect((upstream_ip, int(upstream_port)))
-
-                auth_str = f"{user}:{password}"
-                auth_b64 = base64.b64encode(auth_str.encode()).decode()
-
-                if b"\r\n\r\n" in request:
-                    headers, body = request.split(b"\r\n\r\n", 1)
-                    modified_req = headers + f"\r\nProxy-Authorization: Basic {auth_b64}\r\n\r\n".encode() + body
-                else:
-                    modified_req = request
-
-                upstream_socket.sendall(modified_req)
-                threading.Thread(target=tunnel, args=(client_socket, upstream_socket), daemon=True).start()
-                threading.Thread(target=tunnel, args=(upstream_socket, client_socket), daemon=True).start()
-        except:
-            try: client_socket.close()
-            except: pass
-
-    def server_loop():
-        server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        server.bind(('127.0.0.1', local_port))
-        server.listen(128)
-        while True:
-            try:
-                client_sock, _ = server.accept()
-                threading.Thread(target=handle_client, args=(client_sock,), daemon=True).start()
-            except:
-                break
-
-    t = threading.Thread(target=server_loop, daemon=True)
-    t.start()
-
-# =============================================================
 # 🔧 FUNÇÕES AUXILIARES
 # =============================================================
-def check_page_status_code(driver, target_url):
-    """
-    Inspeciona os logs de performance do Chrome para capturar o
-    status code real da resposta HTTP da página principal.
-    """
-    try:
-        logs = driver.get_log('performance')
-        for entry in logs:
-            log_data = json.loads(entry['message'])['message']
-            if log_data['method'] == 'Network.responseReceived':
-                response = log_data['params']['response']
-                # Verifica se a URL do log bate com o site que estamos acessando
-                if target_url in response['url'] or response['url'] == target_url or response['url'] == target_url + "/":
-                    return int(response['status'])
-    except Exception as e:
-        print(f"⚠️ Não foi possível ler os logs de performance: {e}")
-    return 200 # Fallback padrão caso não encontre nos logs inicializados
-
 def run_diagnostics():
     print("\n--- 🕵️ DIAGNÓSTICO DE CONEXÃO ---")
     try:
         ip = requests.get('https://api.ipify.org', timeout=10).text
-        print(f"🌐 IP Público do Servidor (Sem Proxy): {ip}")
+        print(f"🌐 IP Público: {ip}")
+        res = requests.get(URL_DO_SITE, timeout=10, headers={'User-Agent': 'Mozilla/5.0'})
+        print(f"📡 Status Site (Requests normal): {res.status_code}")
     except Exception as e:
-        print(f"⚠️ Alerta de Rede no diagnóstico: {e}")
+        print(f"⚠️ Alerta de Rede: {e}")
     print("----------------------------------\n")
 
 def getColorClass(value):
@@ -224,6 +125,7 @@ def verificar_modais_bloqueio(driver):
         except: pass
 
 def stealth_script_inject(driver):
+    """Injeta script adicional para mascarar o Selenium"""
     stealth_js = """
     Object.defineProperty(navigator, 'webdriver', {
       get: () => false,
@@ -237,7 +139,7 @@ def stealth_script_inject(driver):
         print(f"Aviso ao injetar stealth script: {e}")
 
 # =============================================================
-# 🚀 DRIVER COM UNDETECTED-CHROMEDRIVER + TUNEL INTEGRADO
+# 🚀 DRIVER COM UNDETECTED-CHROMEDRIVER
 # =============================================================
 def initialize_driver_instance():
     try:
@@ -248,39 +150,29 @@ def initialize_driver_instance():
             subprocess.run("killall -9 chromium-browser chromium chromedriver 2>/dev/null", shell=True)
     except: pass
 
-    PROXY_IP = "38.154.203.95"     
-    PROXY_PORT = "5863"
-    PROXY_USER = "mgczjuye"
-    PROXY_PASS = "jdckgvvzq4o1"
-    LOCAL_TUNNEL_PORT = 8899
-
-    print(f"📡 Ligando túnel de proxy local na porta {LOCAL_TUNNEL_PORT}...")
-    start_local_proxy_tunnel(LOCAL_TUNNEL_PORT, PROXY_IP, PROXY_PORT, PROXY_USER, PROXY_PASS)
-    sleep(1.5) 
-
     options = uc.ChromeOptions()
     options.page_load_strategy = 'eager'
     
-    # 📌 ATIVA CAPTURA DE LOGS DE PERFORMANCE (Fundamental para capturar o Status HTTP)
-    options.set_capability('goog:loggingPrefs', {'performance': 'ALL'})
-
-    options.add_argument(f"--proxy-server=127.0.0.1:{LOCAL_TUNNEL_PORT}")
+    # Obrigatório para servidores
     options.add_argument("--headless=new")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-popup-blocking")
     
+    # ✅ Novas configurações de camuflagem
     options.add_argument("--window-size=1920,1080")
-    options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36")
+    options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
     options.add_argument("--disable-blink-features=AutomationControlled")
 
     try:
-        driver = uc.Chrome(options=options, version_main=148)
+        # Inicializa usando undetected_chromedriver
+        driver = uc.Chrome(options=options)
         
+        # Mantendo o selenium-stealth como camada extra de proteção
         stealth(driver,
             languages=["pt-BR", "pt"],
             vendor="Google Inc.",
-            platform="Win32",
+            platform="Win32", # Simula que estamos no Windows
             webgl_vendor="Intel Inc.",
             renderer="Intel Iris OpenGL Engine",
             fix_hairline=True,
@@ -291,13 +183,12 @@ def initialize_driver_instance():
         return None
 
 def setup_tabs(driver):
-    stealth_script_inject(driver)
+    stealth_script_inject(driver) # ✅ Injeção de script CDP adicionada
     
-    print("➡️ Acessando site e configurando abas...")
+    print("➡️ Acessando site e configurando abas com Anti-Detecção UC...")
     try:
         driver.get(URL_DO_SITE)
-        sleep(5) 
-
+        sleep(10) # Aguarda validação do Cloudflare
         verificar_modais_bloqueio(driver)
 
         WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Entrar')]"))).click()
@@ -310,26 +201,22 @@ def setup_tabs(driver):
     except Exception as e:
         print(f"⚠️ Aviso no login: {e}")
 
-    try:
-        driver.get(LINK_AVIATOR_ORIGINAL)
-        sleep(5)
-        handle_original = driver.current_window_handle
-        print(f"✅ Aba Aviator 1 configurada.")
+    driver.get(LINK_AVIATOR_ORIGINAL)
+    sleep(5)
+    handle_original = driver.current_window_handle
+    print(f"✅ Aba Aviator 1 configurada.")
 
-        driver.execute_script("window.open('');")
-        handles = driver.window_handles
-        handle_aviator2 = [h for h in handles if h != handle_original][0]
-        
-        driver.switch_to.window(handle_aviator2)
-        driver.get(LINK_AVIATOR_2)
-        sleep(5)
-        print(f"✅ Aba Aviator 2 configurada.")
-        
-        driver.switch_to.window(handle_original) 
-        return {FIREBASE_PATH_ORIGINAL: handle_original, FIREBASE_PATH_2: handle_aviator2}
-    except Exception as e:
-        print(f"❌ Erro ao configurar abas do jogo: {e}")
-        return None
+    driver.execute_script("window.open('');")
+    handles = driver.window_handles
+    handle_aviator2 = [h for h in handles if h != handle_original][0]
+    
+    driver.switch_to.window(handle_aviator2)
+    driver.get(LINK_AVIATOR_2)
+    sleep(5)
+    print(f"✅ Aba Aviator 2 configurada.")
+    
+    driver.switch_to.window(handle_original) 
+    return {FIREBASE_PATH_ORIGINAL: handle_original, FIREBASE_PATH_2: handle_aviator2}
 
 # =============================================================
 # 🎮 BUSCA DE ELEMENTOS
@@ -408,7 +295,7 @@ def rodar_ciclo_monitoramento():
     STOP_EVENT.clear() 
     
     try:
-        print("\n🔵 INICIANDO NOVO CICLO COM PROXY WEBSHARE + UC...")
+        print("\n🔵 INICIANDO NOVO CICLO COM UNDETECTED-CHROMEDRIVER...")
         DRIVER = initialize_driver_instance()
         
         if not DRIVER:
@@ -417,9 +304,6 @@ def rodar_ciclo_monitoramento():
             return
 
         handles = setup_tabs(DRIVER)
-        if not handles:
-            print("⚠️ Ciclo interrompido no setup inicial.")
-            return
         
         handle_original = handles[FIREBASE_PATH_ORIGINAL]
         handle_aviator2 = handles[FIREBASE_PATH_2]
@@ -456,7 +340,7 @@ if __name__ == "__main__":
     run_diagnostics()
     
     if not EMAIL or not PASSWORD:
-        print("❗ Configure EMAIL e PASSWORD nas variáveis de ambiente do painel.")
+        print("❗ Configure EMAIL e PASSWORD nas variáveis de ambiente.")
         sys.exit()
     
     print("==============================================")
