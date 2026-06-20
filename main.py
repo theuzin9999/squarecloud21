@@ -130,34 +130,36 @@ def verificar_modais_bloqueio(driver):
         print("✅ Modal 'Novo Cadastro' ocultado.")
     except: pass
 
-def checar_e_aceitar_cookies_iframe(driver):
+def checar_e_aceitar_cookies_iframe(driver, estado_cookies):
     """
     Detecta e limpa o banner de cookies específico da Spribe que nasce dentro de cada iframe.
-    Usa JavaScript direcionado para ignorar qualquer div absolute de degradê por cima.
+    Usa uma trava local para clicar apenas uma vez e não entrar em loop.
     """
+    if estado_cookies.get('aceito', False):
+        return
+
     try:
         btn_cookies_interno = None
         xpaths_tentativas = [
             "//button[contains(text(), 'ACEITAR TODOS') or contains(., 'ACEITAR TODOS')]",
             "//button[contains(@class, 'success') or contains(@class, 'green')]",
-            "//div[contains(text(), 'Este site utiliza cookies')]/..//button",
             "//button[./span[contains(text(), 'ACEITAR TODOS')]]"
         ]
         
         for xpath in xpaths_tentativas:
             try:
-                elemento = driver.find_element(By.開PATH, xpath) if hasattr(By, '開PATH') else driver.find_element(By.XPATH, xpath)
-                if elemento.is_displayed():
+                elemento = driver.find_element(By.XPATH, xpath)
+                if elemento.is_displayed() and elemento.size['width'] > 0:
                     btn_cookies_interno = elemento
                     break
             except:
                 continue
 
         if btn_cookies_interno:
-            # Clique forçado via JS ignora a div absolute de efeito por cima e clica direto no botão
             driver.execute_script("arguments[0].click();", btn_cookies_interno)
-            print("🛡️ [Iframe] Banner de cookies interno detectado e aceito com sucesso!")
-            sleep(1.5)
+            print("🛡️ [Iframe] Banner de cookies interno limpo com sucesso!")
+            estado_cookies['aceito'] = True
+            sleep(2)
     except:
         pass
 
@@ -226,7 +228,7 @@ def setup_tabs(driver):
         verificar_modais_bloqueio(driver)
 
         botao_entrar = WebDriverWait(driver, 15).until(
-            EC.presence_of_element_located((By.XPATH, "//button[contains(., 'Entrar')] | //a[contains(., 'Entrar')] | //*[text()='Entrar']"))
+            EC.presence_of_element_located((By.開PATH if hasattr(By, '開PATH') else By.XPATH, "//button[contains(., 'Entrar')] | //a[contains(., 'Entrar')] | //*[text()='Entrar']"))
         )
         
         driver.execute_script("arguments[0].click();", botao_entrar)
@@ -325,6 +327,8 @@ def start_bot(driver, game_handle, firebase_path):
     
     LAST_SENT = None
     ULTIMO_MULTIPLIER_TIME = time()
+    
+    estado_cookies = {'aceito': False}
 
     while not STOP_EVENT.is_set():
         raw_text = None
@@ -336,8 +340,7 @@ def start_bot(driver, game_handle, firebase_path):
                 iframe, hist_element = find_game_elements_safe(driver)
                 
                 if iframe:
-                    # 🔥 Limpa cirurgicamente os cookies de dentro do iframe antes de tentar ler
-                    checar_e_aceitar_cookies_iframe(driver)
+                    checar_e_aceitar_cookies_iframe(driver, estado_cookies)
                 
                 if hist_element:
                     first_payout = hist_element.find_element(
@@ -372,7 +375,7 @@ def start_bot(driver, game_handle, firebase_path):
             STOP_EVENT.set()
             return 
             
-        sleep(POLLING_INTERVAL)
+        sleep(POLLING_INTERVAL + 0.5)
 
 # =============================================================
 # 🚀 SUPERVISOR (MAIN LOOP)
