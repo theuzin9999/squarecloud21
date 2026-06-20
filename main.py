@@ -75,7 +75,6 @@ def run_diagnostics():
     print("----------------------------------\n")
 
 def limpar_pngs_antigos():
-    """🧹 Remove prints antigos para liberar espaço no container"""
     try:
         arquivos_png = glob.glob("*.png")
         if arquivos_png:
@@ -108,9 +107,8 @@ def enviar_firebase_async(path, data):
     threading.Thread(target=_send, daemon=True).start()
 
 def verificar_modais_bloqueio(driver):
-    """Fecha ativamente modais e avisos de cookies usando JS para evitar sobreposição"""
     try:
-        btn_cookies = driver.find_element(By.XPATH, "//button[contains(text(), 'ACEITAR TODOS') or contains(., 'ACEITAR TODOS')]")
+        btn_cookies = driver.find_element(By.開Xpath if False else By.XPATH, "//button[contains(text(), 'ACEITAR TODOS') or contains(., 'ACEITAR TODOS')]")
         driver.execute_script("arguments[0].click();", btn_cookies)
         print("✅ Banner de Cookies aceito.")
         sleep(1)
@@ -161,7 +159,6 @@ def initialize_driver_instance():
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-popup-blocking")
     
-    # 🔥 Força resolução Ultra-Wide de Desktop para renderizar perfeitamente o painel de histórico spribe
     options.add_argument("--window-size=2560,1440")
     options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
     options.add_argument("--disable-blink-features=AutomationControlled")
@@ -222,7 +219,6 @@ def setup_tabs(driver):
         driver.get(LINK_AVIATOR_ORIGINAL)
         sleep(12) 
         handle_original = driver.current_window_handle
-        driver.save_screenshot("aviator1_inicial.png")
 
         print("🎯 Configurando Aviator 2 (VIP)...")
         driver.execute_script("window.open('');")
@@ -232,7 +228,6 @@ def setup_tabs(driver):
         driver.switch_to.window(handle_aviator2)
         driver.get(LINK_AVIATOR_2)
         sleep(12) 
-        driver.save_screenshot("aviator2_inicial.png")
         
         driver.switch_to.window(handle_original)
         return {FIREBASE_PATH_ORIGINAL: handle_original, FIREBASE_PATH_2: handle_aviator2}
@@ -242,46 +237,39 @@ def setup_tabs(driver):
         return None
 
 # =============================================================
-# 🎮 BUSCA DE ELEMENTOS BLINDADA E DINÂMICA
+# 🎮 EXTRAÇÃO CONECTADA DIRETAMENTE AO IFRAME E AO SEU HTML
 # =============================================================
-def find_game_elements_safe(driver, nome_log):
+def capturar_multiplicador_headless(driver):
     try:
-        driver.implicitly_wait(1)
+        driver.implicitly_wait(0.5)
         
-        # Rola a tela levemente para baixo para forçar o carregamento visual dos frames internos
-        driver.execute_script("window.scrollTo(0, 300);")
+        # 1. Garante que estamos limpando o contexto e focando na raiz primeiro
+        driver.switch_to.default_content()
         
-        # Captura TODOS os iframes da página para varredura cirúrgica
+        # 2. Busca e entra no iframe do jogo
         iframes = driver.find_elements(By.TAG_NAME, 'iframe')
-        
         iframe_alvo = None
-        for index, frame in enumerate(iframes):
+        for frame in iframes:
             src = frame.get_attribute("src") or ""
-            id_attr = frame.get_attribute("id") or ""
-            if "spribe" in src or "aviator" in src or "game" in id_attr or "game" in src:
+            if "spribe" in src or "aviator" in src:
                 iframe_alvo = frame
                 break
-                
+        
         if not iframe_alvo and len(iframes) > 0:
-            # Fallback definitivo: se não achar por texto, pega o primeiro frame grande da tela
             iframe_alvo = iframes[0]
-
+            
         if iframe_alvo:
             driver.switch_to.frame(iframe_alvo)
             
-            # Seletores ultra expandidos cobrindo qualquer variação do app spribe desktop/mobile
-            hist = driver.find_element(
-                By.CSS_SELECTOR, 
-                "app-stats-widget, .payouts-block, .stats-widget, .history-item, div.payouts, .payouts"
-            )
-            driver.implicitly_wait(10)
-            return iframe_alvo, hist
+            # 🎯 Mapeamento cirúrgico baseado no seu HTML real para contornar os comentários Angular ()
+            # Pega estritamente a primeira ocorrência da div payout visível
+            first_payout = driver.find_element(By.XPATH, "(//div[contains(@class, 'payout')])[1]")
+            texto = first_payout.get_attribute("innerText") or first_payout.text
+            return texto
             
-        driver.implicitly_wait(10)
-        return None, None
+        return None
     except:
-        driver.implicitly_wait(10)
-        return None, None
+        return None
 
 # =============================================================
 # 🔄 LOOP DE CAPTURA COMBINADO
@@ -300,26 +288,16 @@ def start_bot(driver, game_handle, firebase_path):
             if STOP_EVENT.is_set(): break
             try:
                 driver.switch_to.window(game_handle)
-                driver.switch_to.default_content()
+                raw_text = capturar_multiplicador_headless(driver)
                 
-                iframe, hist_element = find_game_elements_safe(driver, nome_log)
-                
-                if hist_element:
-                    alertou_falha = False # Reseta o alerta caso ache
-                    # Tenta extrair usando as classes do seu bot local estável
-                    first_payout = hist_element.find_element(
-                        By.CSS_SELECTOR, 
-                        "[appcoloredmultiplier].payout:first-child, .payout:first-child, .bubble-multiplier:first-child, .history-item:first-child, .multiplier-text, div.bubble-multiplier"
-                    )
-                    raw_text = first_payout.get_attribute("innerText") or first_payout.text
-                else:
-                    if not alertou_falha:
-                        print(f"⏳ [{nome_log}] Aguardando renderização do painel/iframe do jogo na tela...")
-                        alertou_falha = True
-            except Exception:
+                if not raw_text and not alertou_falha:
+                    print(f"⏳ [{nome_log}] Buscando conexão com o painel interno de resultados...")
+                    alertou_falha = True
+            except:
                 pass
 
         if raw_text:
+            alertou_falha = False
             clean_text = raw_text.strip().lower().replace('x', '').replace('\n', '').strip()
             if clean_text:
                 try:
@@ -340,7 +318,7 @@ def start_bot(driver, game_handle, firebase_path):
                 except: pass 
 
         if (time() - ULTIMO_MULTIPLIER_TIME) > TEMPO_MAX_INATIVIDADE:
-            print(f"⚠️ [{nome_log}] Sem dados por mais de {TEMPO_MAX_INATIVIDADE}s. Reiniciando ciclo...")
+            print(f"⚠️ [{nome_log}] Sem novos dados capturados por {TEMPO_MAX_INATIVIDADE}s. Reiniciando ciclo de rede...")
             STOP_EVENT.set()
             return 
             
