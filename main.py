@@ -46,7 +46,7 @@ except Exception as e:
 # =============================================================
 # ⚙️ VARIÁVEIS 
 # =============================================================
-URL_DO_SITE = "https://go.goathbet.com/c/7vo"
+URL_DO_SITE = "https://www.example.com"
 
 FIREBASE_PATH_ORIGINAL = "history"
 FIREBASE_PATH_2 = "aviator2"
@@ -165,7 +165,8 @@ def initialize_driver_instance():
     options.add_argument("--disable-blink-features=AutomationControlled")
 
     try:
-        driver = uc.Chrome(options=options)
+        # 🔥 Forçando explicitamente a versão do Chrome da Square Cloud (148) para evitar conflitos
+        driver = uc.Chrome(options=options, version_main=148)
         
         stealth(driver,
             languages=["pt-BR", "pt"],
