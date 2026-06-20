@@ -44,9 +44,11 @@ except Exception as e:
     sys.exit()
 
 # =============================================================
-# ⚙️ VARIÁVEIS 
+# ⚙️ VARIÁVEIS OFICIAIS GOATHBET
 # =============================================================
 URL_DO_SITE = "https://go.goathbet.com/c/7vo"
+LINK_AVIATOR_ORIGINAL = "https://www.goathbet.bet/casino/spribe/aviator"
+LINK_AVIATOR_2 = "https://www.goathbet.bet/casino/spribe/aviator-vip"
 
 FIREBASE_PATH_ORIGINAL = "history"
 FIREBASE_PATH_2 = "aviator2"
@@ -110,7 +112,7 @@ def verificar_modais_bloqueio(driver):
     # 1. Fechar modal de 18 Anos se estiver visível
     try:
         btn_18 = WebDriverWait(driver, 5).until(
-            EC.element_to_be_clickable((By.XPATH, "//span[contains(text(), 'Sim, sou maior de 18')]"))
+            EC.element_to_be_clickable((By.開Xpath, "//span[contains(text(), 'Sim, sou maior de 18')]"))
         )
         btn_18.click()
         sleep(1.5)
@@ -165,7 +167,7 @@ def initialize_driver_instance():
     options.add_argument("--disable-blink-features=AutomationControlled")
 
     try:
-        # 🔥 Forçando explicitamente a versão do Chrome da Square Cloud (148) para evitar conflitos
+        # 🔥 Mantendo a versão fixa 148 do container da Square Cloud
         driver = uc.Chrome(options=options, version_main=148)
         
         stealth(driver,
@@ -189,17 +191,14 @@ def setup_tabs(driver):
         driver.get(URL_DO_SITE)
         sleep(10) 
         
-        # Remove os modais da frente antes de prosseguir
         verificar_modais_bloqueio(driver)
 
-        # Clica no botão Entrar usando a classe estrutural precisa obtida do HTML
         botao_entrar = WebDriverWait(driver, 15).until(
             EC.element_to_be_clickable((By.XPATH, "//button[@data-variant='ghost' and contains(., 'Entrar')]"))
         )
         botao_entrar.click()
         sleep(3)
         
-        # Alvos explícitos usando ID para ignorar os inputs fantasmas do modal de cadastro secundário
         input_email = WebDriverWait(driver, 10).until(EC.visibility_of_element_located((By.ID, "email")))
         input_email.send_keys(EMAIL)
         
@@ -216,42 +215,64 @@ def setup_tabs(driver):
         except: pass
         return None
 
+    # =============================================================
+    # 🔄 ABAS E REDUNDÂNCIA DE DIRECIONAMENTO (CLIQUE VS LINK)
+    # =============================================================
     try:
-        # Acessa o Aviator 1 clicando no Card dinâmico via atributo ALT da imagem
-        card_aviator1 = WebDriverWait(driver, 15).until(
-            EC.element_to_be_clickable((By.XPATH, "//img[@alt='Aviator']"))
-        )
-        card_aviator1.click()
+        print("🎯 Configurando Aviator 1...")
+        try:
+            # Estratégia 1: Tentar clicar no card visualmente
+            card_aviator1 = WebDriverWait(driver, 8).until(
+                EC.element_to_be_clickable((By.XPATH, "//img[@alt='Aviator']"))
+            )
+            card_aviator1.click()
+            print("👉 Aviator 1 acessado via clique no card.")
+        except Exception:
+            # Estratégia 2 (Redundância): Se o card sumir ou falhar, força o link direto
+            print("⚠️ Falha ao clicar no card do Aviator 1. Forçando navegação direta por link...")
+            driver.get(LINK_AVIATOR_ORIGINAL)
+            
         sleep(8) 
-        
         handle_original = driver.current_window_handle
         driver.save_screenshot("aviator1_inicial.png")
         print("📸 Print inicial 'aviator1_inicial.png' gerado com sucesso.")
         print(f"✅ Aba Aviator 1 configurada.")
 
-        # Abre uma nova aba, chaveia para ela e volta para a Home para coletar o Aviator VIP
+        print("🎯 Configurando Aviator 2 (VIP)...")
+        # Abre uma nova aba em branco
         driver.execute_script("window.open('');")
         handles = driver.window_handles
         handle_aviator2 = [h for h in handles if h != handle_original][0]
         
         driver.switch_to.window(handle_aviator2)
+        
+        # Volta para a home para tentar o clique
         driver.get(URL_DO_SITE)
-        sleep(5)
+        sleep(6)
         
-        card_aviator2 = WebDriverWait(driver, 15).until(
-            EC.element_to_be_clickable((By.XPATH, "//img[@alt='Aviator VIP']"))
-        )
-        card_aviator2.click()
+        try:
+            # Estratégia 1: Tentar clicar no card VIP
+            card_aviator2 = WebDriverWait(driver, 8).until(
+                EC.element_to_be_clickable((By.XPATH, "//img[@alt='Aviator VIP']"))
+            )
+            card_aviator2.click()
+            print("👉 Aviator 2 acessado via clique no card.")
+        except Exception:
+            # Estratégia 2 (Redundância): Se falhar, força a URL VIP direta
+            print("⚠️ Falha ao clicar no card do Aviator 2. Forçando navegação direta por link...")
+            driver.get(LINK_AVIATOR_2)
+            
         sleep(8) 
-        
         driver.save_screenshot("aviator2_inicial.png")
         print("📸 Print inicial 'aviator2_inicial.png' gerado com sucesso.")
         print(f"✅ Aba Aviator 2 configurada.")
         
+        # Deixa o driver posicionado na primeira aba
         driver.switch_to.window(handle_original)
         return {FIREBASE_PATH_ORIGINAL: handle_original, FIREBASE_PATH_2: handle_aviator2}
+        
     except Exception as e:
-        print(f"⚠️ Falha ao abrir as páginas internas do jogo por cliques: {e}")
+        print(f"⚠️ Falha fatal ao estruturar as páginas internas do jogo: {e}")
         return None
 
 # =============================================================
