@@ -161,7 +161,8 @@ def initialize_driver_instance():
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-popup-blocking")
     
-    options.add_argument("--window-size=1920,1080")
+    # 🔥 Força resolução Ultra-Wide de Desktop para renderizar perfeitamente o painel de histórico spribe
+    options.add_argument("--window-size=2560,1440")
     options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
     options.add_argument("--disable-blink-features=AutomationControlled")
 
@@ -208,9 +209,9 @@ def setup_tabs(driver):
         botao_submit = driver.find_element(By.XPATH, "//button[@type='submit']")
         driver.execute_script("arguments[0].click();", botao_submit)
         print("✅ Formulário de login enviado.")
-        sleep(12) 
+        sleep(15) 
     except Exception as e:
-        print(f"❌ ERRO ETAPSA DE LOGIN: {e}")
+        print(f"❌ ERRO ETAPAS DE LOGIN: {e}")
         return None
 
     # =============================================================
@@ -219,7 +220,7 @@ def setup_tabs(driver):
     try:
         print("🎯 Configurando Aviator 1...")
         driver.get(LINK_AVIATOR_ORIGINAL)
-        sleep(10) 
+        sleep(12) 
         handle_original = driver.current_window_handle
         driver.save_screenshot("aviator1_inicial.png")
 
@@ -230,7 +231,7 @@ def setup_tabs(driver):
         
         driver.switch_to.window(handle_aviator2)
         driver.get(LINK_AVIATOR_2)
-        sleep(10) 
+        sleep(12) 
         driver.save_screenshot("aviator2_inicial.png")
         
         driver.switch_to.window(handle_original)
@@ -241,32 +242,57 @@ def setup_tabs(driver):
         return None
 
 # =============================================================
-# 🎮 BUSCA DE ELEMENTOS (IFRAME E BLOCO DE RESULTADOS)
+# 🎮 BUSCA DE ELEMENTOS BLINDADA E DINÂMICA
 # =============================================================
-def find_game_elements_safe(driver):
+def find_game_elements_safe(driver, nome_log):
     try:
-        driver.implicitly_wait(3)
-        # Varre os possíveis iframes onde o jogo pode estar envelopado
-        iframe = driver.find_element(By.XPATH, '//iframe[contains(@src, "spribe") or contains(@src, "aviator") or contains(@id, "game")]')
-        driver.switch_to.frame(iframe)
+        driver.implicitly_wait(1)
         
-        # Seletores combinados (Padrão local + Padrão Headless Servidor)
-        hist = driver.find_element(By.CSS_SELECTOR, "app-stats-widget, .payouts-block, .stats-widget, .history-item")
+        # Rola a tela levemente para baixo para forçar o carregamento visual dos frames internos
+        driver.execute_script("window.scrollTo(0, 300);")
+        
+        # Captura TODOS os iframes da página para varredura cirúrgica
+        iframes = driver.find_elements(By.TAG_NAME, 'iframe')
+        
+        iframe_alvo = None
+        for index, frame in enumerate(iframes):
+            src = frame.get_attribute("src") or ""
+            id_attr = frame.get_attribute("id") or ""
+            if "spribe" in src or "aviator" in src or "game" in id_attr or "game" in src:
+                iframe_alvo = frame
+                break
+                
+        if not iframe_alvo and len(iframes) > 0:
+            # Fallback definitivo: se não achar por texto, pega o primeiro frame grande da tela
+            iframe_alvo = iframes[0]
+
+        if iframe_alvo:
+            driver.switch_to.frame(iframe_alvo)
+            
+            # Seletores ultra expandidos cobrindo qualquer variação do app spribe desktop/mobile
+            hist = driver.find_element(
+                By.CSS_SELECTOR, 
+                "app-stats-widget, .payouts-block, .stats-widget, .history-item, div.payouts, .payouts"
+            )
+            driver.implicitly_wait(10)
+            return iframe_alvo, hist
+            
         driver.implicitly_wait(10)
-        return iframe, hist
+        return None, None
     except:
         driver.implicitly_wait(10)
         return None, None
 
 # =============================================================
-# 🔄 LOOP DE CAPTURA COMBINADO (IGUAL AO SEU LOCAL)
+# 🔄 LOOP DE CAPTURA COMBINADO
 # =============================================================
 def start_bot(driver, game_handle, firebase_path):
     nome_log = "AVIATOR 1" if "history" in firebase_path else "AVIATOR 2"
-    print(f"🚀 INICIADO EN EXTRAÇÃO DE DADOS: {nome_log}")
+    print(f"🚀 INICIADO EM EXTRAÇÃO DE DADOS: {nome_log}")
     
     LAST_SENT = None
     ULTIMO_MULTIPLIER_TIME = time()
+    alertou_falha = False
 
     while not STOP_EVENT.is_set():
         raw_text = None
@@ -275,19 +301,25 @@ def start_bot(driver, game_handle, firebase_path):
             try:
                 driver.switch_to.window(game_handle)
                 driver.switch_to.default_content()
-                iframe, hist_element = find_game_elements_safe(driver)
+                
+                iframe, hist_element = find_game_elements_safe(driver, nome_log)
                 
                 if hist_element:
-                    # 🔥 MÚLTIPLOS SELETORES: Garante a extração exata do primeiro multiplicador da barra de histórico
+                    alertou_falha = False # Reseta o alerta caso ache
+                    # Tenta extrair usando as classes do seu bot local estável
                     first_payout = hist_element.find_element(
                         By.CSS_SELECTOR, 
-                        "[appcoloredmultiplier].payout:first-child, .payout:first-child, .bubble-multiplier:first-child, .history-item:first-child, .multiplier-text"
+                        "[appcoloredmultiplier].payout:first-child, .payout:first-child, .bubble-multiplier:first-child, .history-item:first-child, .multiplier-text, div.bubble-multiplier"
                     )
                     raw_text = first_payout.get_attribute("innerText") or first_payout.text
-            except: pass
+                else:
+                    if not alertou_falha:
+                        print(f"⏳ [{nome_log}] Aguardando renderização do painel/iframe do jogo na tela...")
+                        alertou_falha = True
+            except Exception:
+                pass
 
         if raw_text:
-            # Tratamento completo de string limpando quebras de linha e caracteres espúrios
             clean_text = raw_text.strip().lower().replace('x', '').replace('\n', '').strip()
             if clean_text:
                 try:
@@ -300,7 +332,6 @@ def start_bot(driver, game_handle, firebase_path):
                             "color": getColorClass(novo_valor),
                             "date": now_br.strftime("%Y-%m-%d")
                         }
-                        # Respeita o padrão de nó e salvamento assíncrono do Firebase
                         chave_firebase = now_br.strftime('%Y-%m-%d_%H-%M-%S-%f')[:-3]
                         enviar_firebase_async(f"{firebase_path}/{chave_firebase}", payload)
                         
@@ -308,9 +339,8 @@ def start_bot(driver, game_handle, firebase_path):
                         ULTIMO_MULTIPLIER_TIME = time()
                 except: pass 
 
-        # Cooldown anti-travamento de 6 minutos caso o jogo mude de layout ou congele
         if (time() - ULTIMO_MULTIPLIER_TIME) > TEMPO_MAX_INATIVIDADE:
-            print(f"⚠️ [{nome_log}] Sem dados por mais de {TEMPO_MAX_INATIVIDADE}s. Reiniciando...")
+            print(f"⚠️ [{nome_log}] Sem dados por mais de {TEMPO_MAX_INATIVIDADE}s. Reiniciando ciclo...")
             STOP_EVENT.set()
             return 
             
@@ -345,7 +375,6 @@ def rodar_ciclo_monitoramento():
 
         print("⏳ Monitoramento iniciado e pareado com as Threads com sucesso...")
         
-        # Garante o gerenciamento nativo com threading idêntico ao ambiente estável local
         t1 = threading.Thread(target=start_bot, args=(DRIVER, handle_original, FIREBASE_PATH_ORIGINAL), daemon=True)
         t2 = threading.Thread(target=start_bot, args=(DRIVER, handle_aviator2, FIREBASE_PATH_2), daemon=True)
 
