@@ -15,7 +15,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
 
-# 🔥 NOVA BIBLIOTECA DE CAMUFLAGEM
+# 🔥 BIBLIOTECAS DE CAMUFLAGEM
 import undetected_chromedriver as uc
 from selenium_stealth import stealth
 
@@ -32,7 +32,7 @@ STOP_EVENT = threading.Event()
 # 🔥 CONFIGURAÇÃO FIREBASE
 # =============================================================
 SERVICE_ACCOUNT_FILE = 'serviceAccountKey.json'
-DATABASE_URL = 'https://your-database.firebaseio.com'
+DATABASE_URL = 'https://history-dashboard-a70ee-default-rtdb.firebaseio.com'
 
 try:
     if not firebase_admin._apps:
@@ -46,9 +46,9 @@ except Exception as e:
 # =============================================================
 # ⚙️ VARIÁVEIS OFICIAIS GOATHBET
 # =============================================================
-URL_DO_SITE = "https://go.goathbet.com/c/7vo"
-LINK_AVIATOR_ORIGINAL = "https://www.goathbet.bet/casino/spribe/aviator"
-LINK_AVIATOR_2 = "https://www.goathbet.bet/casino/spribe/aviator-vip"
+URL_DO_SITE = "https://www.goathbet.com"
+LINK_AVIATOR_ORIGINAL = "https://www.goathbet.com/pt/casino/spribe/aviator"
+LINK_AVIATOR_2 = "https://www.goathbet.com/casino/spribe/aviator-vip"
 
 FIREBASE_PATH_ORIGINAL = "history"
 FIREBASE_PATH_2 = "aviator2"
@@ -75,7 +75,7 @@ def run_diagnostics():
     print("----------------------------------\n")
 
 def limpar_pngs_antigos():
-    """🧹 Remove todos os prints da raiz a cada reinício para economizar espaço"""
+    """🧹 Remove prints antigos para liberar espaço no container"""
     try:
         arquivos_png = glob.glob("*.png")
         if arquivos_png:
@@ -108,16 +108,14 @@ def enviar_firebase_async(path, data):
     threading.Thread(target=_send, daemon=True).start()
 
 def verificar_modais_bloqueio(driver):
-    """Fecha ativamente modais conhecidos e o aviso de cookies em sequência"""
-    # 1. Fechar modal de Cookies (Evita cobrir o botão de login em baixo)
+    """Fecha ativamente modais e avisos de cookies usando JS para evitar sobreposição"""
     try:
         btn_cookies = driver.find_element(By.XPATH, "//button[contains(text(), 'ACEITAR TODOS') or contains(., 'ACEITAR TODOS')]")
         driver.execute_script("arguments[0].click();", btn_cookies)
-        print("✅ Banner de Cookies aceito e fechado.")
+        print("✅ Banner de Cookies aceito.")
         sleep(1)
     except: pass
 
-    # 2. Fechar modal de 18 Anos se estiver visível
     try:
         btn_18 = driver.find_element(By.XPATH, "//span[contains(text(), 'Sim, sou maior de 18')] | //button[contains(., 'Sim, sou maior de 18')]")
         driver.execute_script("arguments[0].click();", btn_18)
@@ -125,30 +123,26 @@ def verificar_modais_bloqueio(driver):
         print("✅ Modal 'Maior de 18' fechado.")
     except: pass
 
-    # 3. Fechar modal de Novo Cadastro usando o X (SVG)
     try:
-        btn_fechar_cadastro = driver.find_element(By.XPATH, "//button[@data-slot='dialog-close'] | //button[contains(@class, 'modal-close')]")
+        btn_fechar_cadastro = driver.find_element(By.XPATH, "//button[@data-slot='dialog-close'] | //button[contains(@class, 'modal-close')] | //button[contains(@class, 'goathbet-modal-close')]")
         driver.execute_script("arguments[0].click();", btn_fechar_cadastro)
         sleep(1.5)
         print("✅ Modal 'Novo Cadastro' ocultado.")
     except: pass
 
 def stealth_script_inject(driver):
-    """Injeta script adicional para mascarar o Selenium"""
     stealth_js = """
     Object.defineProperty(navigator, 'webdriver', {
       get: () => false,
     });
     """
     try:
-        driver.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument', {
-            'source': stealth_js
-        })
+        driver.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument', { 'source': stealth_js })
     except Exception as e:
         print(f"Aviso ao injetar stealth script: {e}")
 
 # =============================================================
-# 🚀 DRIVER COM UNDETECTED-CHROMEDRIVER
+# 🚀 DRIVER COM UNDETECTED-CHROMEDRIVER (FIXO 148 SQUARE)
 # =============================================================
 def initialize_driver_instance():
     try:
@@ -172,9 +166,7 @@ def initialize_driver_instance():
     options.add_argument("--disable-blink-features=AutomationControlled")
 
     try:
-        # 🔥 Forçando a versão fixa 148 identificada na sua Square Cloud
         driver = uc.Chrome(options=options, version_main=148)
-        
         stealth(driver,
             languages=["pt-BR", "pt"],
             vendor="Google Inc.",
@@ -196,17 +188,13 @@ def setup_tabs(driver):
         driver.get(URL_DO_SITE)
         sleep(12) 
         
-        # Limpa os modais e cookies da frente antes do login
         verificar_modais_bloqueio(driver)
 
-        # 🎯 Localiza o botão Entrar por múltiplos seletores robustos (Texto ou classe)
         botao_entrar = WebDriverWait(driver, 15).until(
             EC.presence_of_element_located((By.XPATH, "//button[contains(., 'Entrar')] | //a[contains(., 'Entrar')] | //*[text()='Entrar']"))
         )
-        
-        # 🔥 CLIQUE SEGURO VIA JAVASCRIPT: Ignora qualquer bloqueio visual na tela
         driver.execute_script("arguments[0].click();", botao_entrar)
-        print("👉 Botão 'Entrar' clicado via JS com sucesso.")
+        print("👉 Botão 'Entrar' clicado via JS.")
         sleep(4)
         
         input_email = WebDriverWait(driver, 10).until(
@@ -219,36 +207,21 @@ def setup_tabs(driver):
         
         botao_submit = driver.find_element(By.XPATH, "//button[@type='submit']")
         driver.execute_script("arguments[0].click();", botao_submit)
-        
         print("✅ Formulário de login enviado.")
         sleep(12) 
     except Exception as e:
-        print(f"❌ ERRO CRÍTICO NAS ETAPAS DE LOGIN: {e}")
-        try:
-            driver.save_screenshot("erro_login.png")
-            print("📸 Print do erro salvo como 'erro_login.png'")
-        except: pass
+        print(f"❌ ERRO ETAPSA DE LOGIN: {e}")
         return None
 
     # =============================================================
-    # 🔄 ABAS E REDUNDÂNCIA DE DIRECIONAMENTO (CLIQUE VS LINK)
+    # 🔄 DIRECIONAMENTO E CRIAÇÃO DE ABAS
     # =============================================================
     try:
         print("🎯 Configurando Aviator 1...")
-        try:
-            card_aviator1 = WebDriverWait(driver, 8).until(
-                EC.element_to_be_clickable((By.XPATH, "//img[@alt='Aviator']"))
-            )
-            card_aviator1.click()
-            print("👉 Aviator 1 acessado via clique no card.")
-        except Exception:
-            print("⚠️ Falha ao clicar no card do Aviator 1. Forçando navegação direta por link...")
-            driver.get(LINK_AVIATOR_ORIGINAL)
-            
-        sleep(8) 
+        driver.get(LINK_AVIATOR_ORIGINAL)
+        sleep(10) 
         handle_original = driver.current_window_handle
         driver.save_screenshot("aviator1_inicial.png")
-        print("📸 Print inicial 'aviator1_inicial.png' gerado.")
 
         print("🎯 Configurando Aviator 2 (VIP)...")
         driver.execute_script("window.open('');")
@@ -256,39 +229,29 @@ def setup_tabs(driver):
         handle_aviator2 = [h for h in handles if h != handle_original][0]
         
         driver.switch_to.window(handle_aviator2)
-        driver.get(URL_DO_SITE)
-        sleep(6)
-        
-        try:
-            card_aviator2 = WebDriverWait(driver, 8).until(
-                EC.element_to_be_clickable((By.XPATH, "//img[@alt='Aviator VIP']"))
-            )
-            card_aviator2.click()
-            print("👉 Aviator 2 acessado via clique no card.")
-        except Exception:
-            print("⚠️ Falha ao clicar no card do Aviator 2. Forçando navegação direta por link...")
-            driver.get(LINK_AVIATOR_2)
-            
-        sleep(8) 
+        driver.get(LINK_AVIATOR_2)
+        sleep(10) 
         driver.save_screenshot("aviator2_inicial.png")
-        print("📸 Print inicial 'aviator2_inicial.png' gerado.")
         
         driver.switch_to.window(handle_original)
         return {FIREBASE_PATH_ORIGINAL: handle_original, FIREBASE_PATH_2: handle_aviator2}
         
     except Exception as e:
-        print(f"⚠️ Falha fatal ao estruturar as páginas internas do jogo: {e}")
+        print(f"⚠️ Falha fatal ao estruturar abas do jogo: {e}")
         return None
 
 # =============================================================
-# 🎮 BUSCA DE ELEMENTOS
+# 🎮 BUSCA DE ELEMENTOS (IFRAME E BLOCO DE RESULTADOS)
 # =============================================================
 def find_game_elements_safe(driver):
     try:
-        driver.implicitly_wait(2)
-        iframe = driver.find_element(By.XPATH, '//iframe[contains(@src, "spribe") or contains(@src, "aviator")]')
+        driver.implicitly_wait(3)
+        # Varre os possíveis iframes onde o jogo pode estar envelopado
+        iframe = driver.find_element(By.XPATH, '//iframe[contains(@src, "spribe") or contains(@src, "aviator") or contains(@id, "game")]')
         driver.switch_to.frame(iframe)
-        hist = driver.find_element(By.CSS_SELECTOR, "app-stats-widget, .payouts-block")
+        
+        # Seletores combinados (Padrão local + Padrão Headless Servidor)
+        hist = driver.find_element(By.CSS_SELECTOR, "app-stats-widget, .payouts-block, .stats-widget, .history-item")
         driver.implicitly_wait(10)
         return iframe, hist
     except:
@@ -296,11 +259,11 @@ def find_game_elements_safe(driver):
         return None, None
 
 # =============================================================
-# 🔄 LOOP DE CAPTURA
+# 🔄 LOOP DE CAPTURA COMBINADO (IGUAL AO SEU LOCAL)
 # =============================================================
 def start_bot(driver, game_handle, firebase_path):
     nome_log = "AVIATOR 1" if "history" in firebase_path else "AVIATOR 2"
-    print(f"🚀 INICIADO: {nome_log}")
+    print(f"🚀 INICIADO EN EXTRAÇÃO DE DADOS: {nome_log}")
     
     LAST_SENT = None
     ULTIMO_MULTIPLIER_TIME = time()
@@ -315,14 +278,16 @@ def start_bot(driver, game_handle, firebase_path):
                 iframe, hist_element = find_game_elements_safe(driver)
                 
                 if hist_element:
+                    # 🔥 MÚLTIPLOS SELETORES: Garante a extração exata do primeiro multiplicador da barra de histórico
                     first_payout = hist_element.find_element(
                         By.CSS_SELECTOR, 
-                        "[appcoloredmultiplier].payout:first-child, .payout:first-child, .bubble-multiplier:first-child"
+                        "[appcoloredmultiplier].payout:first-child, .payout:first-child, .bubble-multiplier:first-child, .history-item:first-child, .multiplier-text"
                     )
-                    raw_text = first_payout.get_attribute("innerText")
+                    raw_text = first_payout.get_attribute("innerText") or first_payout.text
             except: pass
 
         if raw_text:
+            # Tratamento completo de string limpando quebras de linha e caracteres espúrios
             clean_text = raw_text.strip().lower().replace('x', '').replace('\n', '').strip()
             if clean_text:
                 try:
@@ -335,6 +300,7 @@ def start_bot(driver, game_handle, firebase_path):
                             "color": getColorClass(novo_valor),
                             "date": now_br.strftime("%Y-%m-%d")
                         }
+                        # Respeita o padrão de nó e salvamento assíncrono do Firebase
                         chave_firebase = now_br.strftime('%Y-%m-%d_%H-%M-%S-%f')[:-3]
                         enviar_firebase_async(f"{firebase_path}/{chave_firebase}", payload)
                         
@@ -342,6 +308,7 @@ def start_bot(driver, game_handle, firebase_path):
                         ULTIMO_MULTIPLIER_TIME = time()
                 except: pass 
 
+        # Cooldown anti-travamento de 6 minutos caso o jogo mude de layout ou congele
         if (time() - ULTIMO_MULTIPLIER_TIME) > TEMPO_MAX_INATIVIDADE:
             print(f"⚠️ [{nome_log}] Sem dados por mais de {TEMPO_MAX_INATIVIDADE}s. Reiniciando...")
             STOP_EVENT.set()
@@ -350,7 +317,7 @@ def start_bot(driver, game_handle, firebase_path):
         sleep(POLLING_INTERVAL)
 
 # =============================================================
-# 🚀 SUPERVISOR (MAIN LOOP)
+# 🚀 SUPERVISOR PRINCIPAL
 # =============================================================
 def rodar_ciclo_monitoramento():
     DRIVER = None
@@ -363,21 +330,22 @@ def rodar_ciclo_monitoramento():
         DRIVER = initialize_driver_instance()
         
         if not DRIVER:
-            print("⚠️ Falha ao instanciar o driver. Aguardando para nova tentativa...")
+            print("⚠️ Falha ao instanciar o driver. Aguardando...")
             sleep(10)
             return
 
         handles = setup_tabs(DRIVER)
         
         if not handles:
-            print("⚠️ Ciclo interrompido por falha de autenticação. Reiniciando driver...")
+            print("⚠️ Ciclo interrompido por falha de navegação. Reiniciando driver...")
             return
 
         handle_original = handles[FIREBASE_PATH_ORIGINAL]
         handle_aviator2 = handles[FIREBASE_PATH_2]
 
-        print("⏳ Monitoramento iniciado (Threads)...")
+        print("⏳ Monitoramento iniciado e pareado com as Threads com sucesso...")
         
+        # Garante o gerenciamento nativo com threading idêntico ao ambiente estável local
         t1 = threading.Thread(target=start_bot, args=(DRIVER, handle_original, FIREBASE_PATH_ORIGINAL), daemon=True)
         t2 = threading.Thread(target=start_bot, args=(DRIVER, handle_aviator2, FIREBASE_PATH_2), daemon=True)
 
@@ -392,7 +360,7 @@ def rodar_ciclo_monitoramento():
         print("🛑 Ciclo encerrado. Limpando recursos...")
         
     except Exception as e:
-        print(f"\n❌ ERRO NO CICLO: {e}")
+        print(f"\n❌ ERRO NO CICLO DE EXECUÇÃO: {e}")
         traceback.print_exc()
     finally:
         STOP_EVENT.set() 
