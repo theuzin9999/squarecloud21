@@ -112,7 +112,7 @@ def verificar_modais_bloqueio(driver):
     # 1. Fechar modal de 18 Anos se estiver visível
     try:
         btn_18 = WebDriverWait(driver, 5).until(
-            EC.element_to_be_clickable((By.開Xpath, "//span[contains(text(), 'Sim, sou maior de 18')]"))
+            EC.element_to_be_clickable((By.XPATH, "//span[contains(text(), 'Sim, sou maior de 18')]"))
         )
         btn_18.click()
         sleep(1.5)
@@ -193,8 +193,9 @@ def setup_tabs(driver):
         
         verificar_modais_bloqueio(driver)
 
+        # Seletor CSS super rápido focado puramente na tag button com data-variant=ghost fornecida pelo HTML
         botao_entrar = WebDriverWait(driver, 15).until(
-            EC.element_to_be_clickable((By.XPATH, "//button[@data-variant='ghost' and contains(., 'Entrar')]"))
+            EC.element_to_be_clickable((By.CSS_SELECTOR, "button[data-variant='ghost']"))
         )
         botao_entrar.click()
         sleep(3)
