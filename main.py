@@ -162,7 +162,6 @@ def initialize_driver_instance():
     options.add_argument("--disable-blink-features=AutomationControlled")
 
     try:
-        # Resolve o conflito travando na versão da hospedagem
         driver = uc.Chrome(options=options, version_main=148)
         
         stealth(driver,
@@ -187,32 +186,45 @@ def setup_tabs(driver):
         sleep(10)
         verificar_modais_bloqueio(driver)
 
-        WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Entrar')]"))).click()
+        WebDriverWait(driver, 15).until(EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Entrar')]"))).click()
         sleep(2)
         driver.find_element(By.NAME, "email").send_keys(EMAIL)
         driver.find_element(By.NAME, "password").send_keys(PASSWORD)
         driver.find_element(By.CSS_SELECTOR, "button[type='submit']").click()
-        print("✅ Login enviado.")
+        print("✅ Login enviado com sucesso.")
         sleep(10)
     except Exception as e:
-        print(f"⚠️ Aviso no login: {e}")
+        print(f"❌ ERRO CRÍTICO NO LOGIN: {e}")
+        try:
+            # 📸 Tira o print do erro e salva na raiz do projeto
+            driver.save_screenshot("erro_login.png")
+            print("📸 Print da tela de erro salvo como 'erro_login.png'.")
+        except Exception as screenshot_error:
+            print(f"⚠️ Falha ao tirar print: {screenshot_error}")
+        
+        # Retorna None para avisar o supervisor que o login falhou
+        return None
 
-    driver.get(LINK_AVIATOR_ORIGINAL)
-    sleep(5)
-    handle_original = driver.current_window_handle
-    print(f"✅ Aba Aviator 1 configurada.")
+    try:
+        driver.get(LINK_AVIATOR_ORIGINAL)
+        sleep(5)
+        handle_original = driver.current_window_handle
+        print(f"✅ Aba Aviator 1 configurada.")
 
-    driver.execute_script("window.open('');")
-    handles = driver.window_handles
-    handle_aviator2 = [h for h in handles if h != handle_original][0]
-    
-    driver.switch_to.window(handle_aviator2)
-    driver.get(LINK_AVIATOR_2)
-    sleep(5)
-    print(f"✅ Aba Aviator 2 configurada.")
-    
-    driver.switch_to.window(handle_original)
-    return {FIREBASE_PATH_ORIGINAL: handle_original, FIREBASE_PATH_2: handle_aviator2}
+        driver.execute_script("window.open('');")
+        handles = driver.window_handles
+        handle_aviator2 = [h for h in handles if h != handle_original][0]
+        
+        driver.switch_to.window(handle_aviator2)
+        driver.get(LINK_AVIATOR_2)
+        sleep(5)
+        print(f"✅ Aba Aviator 2 configurada.")
+        
+        driver.switch_to.window(handle_original)
+        return {FIREBASE_PATH_ORIGINAL: handle_original, FIREBASE_PATH_2: handle_aviator2}
+    except Exception as e:
+        print(f"⚠️ Erro ao carregar abas do jogo após login: {e}")
+        return None
 
 # =============================================================
 # 🎮 BUSCA DE ELEMENTOS
@@ -301,6 +313,11 @@ def rodar_ciclo_monitoramento():
 
         handles = setup_tabs(DRIVER)
         
+        # 🛑 Bloqueia o avanço caso o login tenha falhado (handles retorna None)
+        if not handles:
+            print("⚠️ Ciclo abortado por falha no login. Reiniciando driver para nova tentativa...")
+            return
+
         handle_original = handles[FIREBASE_PATH_ORIGINAL]
         handle_aviator2 = handles[FIREBASE_PATH_2]
 
