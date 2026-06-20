@@ -7,6 +7,7 @@ import gc
 import requests
 import subprocess
 import traceback
+import glob
 from time import sleep, time
 from datetime import datetime
 
@@ -31,7 +32,6 @@ STOP_EVENT = threading.Event()
 # 🔥 CONFIGURAÇÃO FIREBASE
 # =============================================================
 SERVICE_ACCOUNT_FILE = 'serviceAccountKey.json'
-# Substitua pela sua URL real do Firebase
 DATABASE_URL = 'https://your-database.firebaseio.com'
 
 try:
@@ -57,7 +57,7 @@ EMAIL = os.getenv("EMAIL")
 PASSWORD = os.getenv("PASSWORD")
 
 POLLING_INTERVAL = 1.0      
-TEMPO_MAX_INATIVIDADE = 360
+TEMPO_MAX_INATIVIDADE = 360 
 TZ_BR = pytz.timezone("America/Sao_Paulo")
 
 # =============================================================
@@ -68,11 +68,33 @@ def run_diagnostics():
     try:
         ip = requests.get('https://api.ipify.org', timeout=10).text
         print(f"🌐 IP Público: {ip}")
-        res = requests.get(URL_DO_SITE, timeout=10, headers={'User-Agent': 'Mozilla/5.0'})
+        
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+            'Accept-Language': 'pt-BR,pt;q=0.8,en-US;q=0.5,en;q=0.3'
+        }
+        res = requests.get(URL_DO_SITE, timeout=12, headers=headers)
         print(f"📡 Status Site (Requests normal): {res.status_code}")
+        if res.status_code == 429:
+            print("⚠️ O site aplicou limite de requisições (429) ao IP. Reduzindo velocidade de inicialização...")
+            sleep(5)
     except Exception as e:
         print(f"⚠️ Alerta de Rede: {e}")
     print("----------------------------------\n")
+
+def limpar_pngs_antigos():
+    """🧹 Remove todos os arquivos .png da raiz para evitar consumo de disco"""
+    try:
+        arquivos_png = glob.glob("*.png")
+        if arquivos_png:
+            for f in arquivos_png:
+                os.remove(f)
+            print(f"🧹 Limpeza concluída: {len(arquivos_png)} prints antigos deletados.")
+        else:
+            print("🧹 Limpeza concluída: Nenhum arquivo de print residual encontrado.")
+    except Exception as e:
+        print(f"⚠️ Aviso ao limpar imagens antigas: {e}")
 
 def getColorClass(value):
     try:
@@ -96,7 +118,7 @@ def enviar_firebase_async(path, data):
 
 def verificar_modais_bloqueio(driver):
     try:
-        btn_18 = WebDriverWait(driver, 3).until(
+        btn_18 = WebDriverWait(driver, 4).until(
             EC.element_to_be_clickable((By.XPATH, "//span[contains(., 'Sim, sou maior de 18')]"))
         )
         btn_18.click()
@@ -106,7 +128,7 @@ def verificar_modais_bloqueio(driver):
 
     try:
         xpath_btn_fechar = "//button[@data-slot='dialog-close' and contains(@class, 'modal-close')]"
-        btn_fechar_cadastro = WebDriverWait(driver, 3).until(
+        btn_fechar_cadastro = WebDriverWait(driver, 4).until(
             EC.element_to_be_clickable((By.XPATH, xpath_btn_fechar))
         )
         btn_fechar_cadastro.click()
@@ -124,7 +146,6 @@ def verificar_modais_bloqueio(driver):
         except: pass
 
 def stealth_script_inject(driver):
-    """Injeta script adicional para mascarar o Selenium"""
     stealth_js = """
     Object.defineProperty(navigator, 'webdriver', {
       get: () => false,
@@ -183,47 +204,54 @@ def setup_tabs(driver):
     print("➡️ Acessando site e configurando abas com Anti-Detecção UC...")
     try:
         driver.get(URL_DO_SITE)
-        sleep(10)
+        sleep(12) 
         verificar_modais_bloqueio(driver)
 
-        WebDriverWait(driver, 15).until(EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Entrar')]"))).click()
-        sleep(2)
+        WebDriverWait(driver, 20).until(EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Entrar')]"))).click()
+        sleep(3)
         driver.find_element(By.NAME, "email").send_keys(EMAIL)
         driver.find_element(By.NAME, "password").send_keys(PASSWORD)
         driver.find_element(By.CSS_SELECTOR, "button[type='submit']").click()
         print("✅ Login enviado com sucesso.")
-        sleep(10)
+        sleep(14) 
     except Exception as e:
-        print(f"❌ ERRO CRÍTICO NO LOGIN: {e}")
+        print(f"❌ ERRO NO LOGIN: {e}")
         try:
-            # 📸 Tira o print do erro e salva na raiz do projeto
             driver.save_screenshot("erro_login.png")
             print("📸 Print da tela de erro salvo como 'erro_login.png'.")
-        except Exception as screenshot_error:
-            print(f"⚠️ Falha ao tirar print: {screenshot_error}")
-        
-        # Retorna None para avisar o supervisor que o login falhou
+        except Exception as scr_err:
+            print(f"⚠️ Falha ao tirar print: {scr_err}")
         return None
 
     try:
+        # Configurando Aviator 1
         driver.get(LINK_AVIATOR_ORIGINAL)
-        sleep(5)
+        sleep(8) # Tempo para o jogo carregar visualmente
         handle_original = driver.current_window_handle
+        try:
+            driver.save_screenshot("aviator1_inicial.png")
+            print("📸 Print inicial 'aviator1_inicial.png' salvo com sucesso!")
+        except: pass
         print(f"✅ Aba Aviator 1 configurada.")
 
+        # Criando e Configurando Aviator 2
         driver.execute_script("window.open('');")
         handles = driver.window_handles
         handle_aviator2 = [h for h in handles if h != handle_original][0]
         
         driver.switch_to.window(handle_aviator2)
         driver.get(LINK_AVIATOR_2)
-        sleep(5)
+        sleep(8) # Tempo para o jogo carregar visualmente
+        try:
+            driver.save_screenshot("aviator2_inicial.png")
+            print("📸 Print inicial 'aviator2_inicial.png' salvo com sucesso!")
+        except: pass
         print(f"✅ Aba Aviator 2 configurada.")
         
         driver.switch_to.window(handle_original)
         return {FIREBASE_PATH_ORIGINAL: handle_original, FIREBASE_PATH_2: handle_aviator2}
     except Exception as e:
-        print(f"⚠️ Erro ao carregar abas do jogo após login: {e}")
+        print(f"⚠️ Erro ao carregar as abas do jogo: {e}")
         return None
 
 # =============================================================
@@ -262,7 +290,7 @@ def start_bot(driver, game_handle, firebase_path):
                 
                 if hist_element:
                     first_payout = hist_element.find_element(
-                        By.CSS_SELECTOR,
+                        By.CSS_SELECTOR, 
                         "[appcoloredmultiplier].payout:first-child, .payout:first-child, .bubble-multiplier:first-child"
                     )
                     raw_text = first_payout.get_attribute("innerText")
@@ -286,12 +314,12 @@ def start_bot(driver, game_handle, firebase_path):
                         
                         LAST_SENT = novo_valor
                         ULTIMO_MULTIPLIER_TIME = time()
-                except: pass 
+                except: pass
 
         if (time() - ULTIMO_MULTIPLIER_TIME) > TEMPO_MAX_INATIVIDADE:
             print(f"⚠️ [{nome_log}] Sem dados por mais de {TEMPO_MAX_INATIVIDADE}s. Reiniciando...")
             STOP_EVENT.set()
-            return 
+            return
             
         sleep(POLLING_INTERVAL)
 
@@ -301,6 +329,9 @@ def start_bot(driver, game_handle, firebase_path):
 def rodar_ciclo_monitoramento():
     DRIVER = None
     STOP_EVENT.clear()
+    
+    # 🧹 Deleta todos os arquivos .png residuais da hospedagem antes de iniciar um novo ciclo
+    limpar_pngs_antigos()
     
     try:
         print("\n🔵 INICIANDO NOVO CICLO COM UNDETECTED-CHROMEDRIVER...")
@@ -313,9 +344,8 @@ def rodar_ciclo_monitoramento():
 
         handles = setup_tabs(DRIVER)
         
-        # 🛑 Bloqueia o avanço caso o login tenha falhado (handles retorna None)
         if not handles:
-            print("⚠️ Ciclo abortado por falha no login. Reiniciando driver para nova tentativa...")
+            print("⚠️ Ciclo cancelado por falha de login. Reiniciando driver para nova tentativa...")
             return
 
         handle_original = handles[FIREBASE_PATH_ORIGINAL]
