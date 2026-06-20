@@ -108,24 +108,29 @@ def enviar_firebase_async(path, data):
     threading.Thread(target=_send, daemon=True).start()
 
 def verificar_modais_bloqueio(driver):
-    """Fecha ativamente modais conhecidos baseados nas tags HTML fornecidas"""
-    # 1. Fechar modal de 18 Anos se estiver visível
+    """Fecha ativamente modais conhecidos e o aviso de cookies em sequência"""
+    # 1. Fechar modal de Cookies (Evita cobrir o botão de login em baixo)
     try:
-        btn_18 = WebDriverWait(driver, 5).until(
-            EC.element_to_be_clickable((By.XPATH, "//span[contains(text(), 'Sim, sou maior de 18')]"))
-        )
-        btn_18.click()
+        btn_cookies = driver.find_element(By.XPATH, "//button[contains(text(), 'ACEITAR TODOS') or contains(., 'ACEITAR TODOS')]")
+        driver.execute_script("arguments[0].click();", btn_cookies)
+        print("✅ Banner de Cookies aceito e fechado.")
+        sleep(1)
+    except: pass
+
+    # 2. Fechar modal de 18 Anos se estiver visível
+    try:
+        btn_18 = driver.find_element(By.XPATH, "//span[contains(text(), 'Sim, sou maior de 18')] | //button[contains(., 'Sim, sou maior de 18')]")
+        driver.execute_script("arguments[0].click();", btn_18)
         sleep(1.5)
         print("✅ Modal 'Maior de 18' fechado.")
     except: pass
 
-    # 2. Fechar modal de Novo Cadastro usando o X (SVG) para evitar confusão de inputs
+    # 3. Fechar modal de Novo Cadastro usando o X (SVG)
     try:
-        btn_fechar_cadastro = driver.find_element(By.XPATH, "//button[@data-slot='dialog-close']//*[local-name()='svg'] | //button[contains(@class, 'modal-close')]")
-        if btn_fechar_cadastro.is_displayed():
-            btn_fechar_cadastro.click()
-            sleep(1.5)
-            print("✅ Modal 'Novo Cadastro' fechado para desobstrução.")
+        btn_fechar_cadastro = driver.find_element(By.XPATH, "//button[@data-slot='dialog-close'] | //button[contains(@class, 'modal-close')]")
+        driver.execute_script("arguments[0].click();", btn_fechar_cadastro)
+        sleep(1.5)
+        print("✅ Modal 'Novo Cadastro' ocultado.")
     except: pass
 
 def stealth_script_inject(driver):
@@ -167,7 +172,7 @@ def initialize_driver_instance():
     options.add_argument("--disable-blink-features=AutomationControlled")
 
     try:
-        # 🔥 Mantendo a versão fixa 148 do container da Square Cloud
+        # 🔥 Forçando a versão fixa 148 identificada na sua Square Cloud
         driver = uc.Chrome(options=options, version_main=148)
         
         stealth(driver,
@@ -189,30 +194,39 @@ def setup_tabs(driver):
     print("➡️ Acessando site e configurando abas com Anti-Detecção UC...")
     try:
         driver.get(URL_DO_SITE)
-        sleep(10) 
+        sleep(12) 
         
+        # Limpa os modais e cookies da frente antes do login
         verificar_modais_bloqueio(driver)
 
-        # Seletor CSS super rápido focado puramente na tag button com data-variant=ghost fornecida pelo HTML
+        # 🎯 Localiza o botão Entrar por múltiplos seletores robustos (Texto ou classe)
         botao_entrar = WebDriverWait(driver, 15).until(
-            EC.element_to_be_clickable((By.CSS_SELECTOR, "button[data-variant='ghost']"))
+            EC.presence_of_element_located((By.XPATH, "//button[contains(., 'Entrar')] | //a[contains(., 'Entrar')] | //*[text()='Entrar']"))
         )
-        botao_entrar.click()
-        sleep(3)
         
-        input_email = WebDriverWait(driver, 10).until(EC.visibility_of_element_located((By.ID, "email")))
+        # 🔥 CLIQUE SEGURO VIA JAVASCRIPT: Ignora qualquer bloqueio visual na tela
+        driver.execute_script("arguments[0].click();", botao_entrar)
+        print("👉 Botão 'Entrar' clicado via JS com sucesso.")
+        sleep(4)
+        
+        input_email = WebDriverWait(driver, 10).until(
+            EC.visibility_of_element_located((By.XPATH, "//input[@id='email' or @name='email']"))
+        )
         input_email.send_keys(EMAIL)
         
-        input_pass = driver.find_element(By.ID, "password")
+        input_pass = driver.find_element(By.XPATH, "//input[@id='password' or @name='password']")
         input_pass.send_keys(PASSWORD)
         
-        driver.find_element(By.CSS_SELECTOR, "button[type='submit']").click()
+        botao_submit = driver.find_element(By.XPATH, "//button[@type='submit']")
+        driver.execute_script("arguments[0].click();", botao_submit)
+        
         print("✅ Formulário de login enviado.")
         sleep(12) 
     except Exception as e:
         print(f"❌ ERRO CRÍTICO NAS ETAPAS DE LOGIN: {e}")
         try:
             driver.save_screenshot("erro_login.png")
+            print("📸 Print do erro salvo como 'erro_login.png'")
         except: pass
         return None
 
@@ -222,53 +236,43 @@ def setup_tabs(driver):
     try:
         print("🎯 Configurando Aviator 1...")
         try:
-            # Estratégia 1: Tentar clicar no card visualmente
             card_aviator1 = WebDriverWait(driver, 8).until(
                 EC.element_to_be_clickable((By.XPATH, "//img[@alt='Aviator']"))
             )
             card_aviator1.click()
             print("👉 Aviator 1 acessado via clique no card.")
         except Exception:
-            # Estratégia 2 (Redundância): Se o card sumir ou falhar, força o link direto
             print("⚠️ Falha ao clicar no card do Aviator 1. Forçando navegação direta por link...")
             driver.get(LINK_AVIATOR_ORIGINAL)
             
         sleep(8) 
         handle_original = driver.current_window_handle
         driver.save_screenshot("aviator1_inicial.png")
-        print("📸 Print inicial 'aviator1_inicial.png' gerado com sucesso.")
-        print(f"✅ Aba Aviator 1 configurada.")
+        print("📸 Print inicial 'aviator1_inicial.png' gerado.")
 
         print("🎯 Configurando Aviator 2 (VIP)...")
-        # Abre uma nova aba em branco
         driver.execute_script("window.open('');")
         handles = driver.window_handles
         handle_aviator2 = [h for h in handles if h != handle_original][0]
         
         driver.switch_to.window(handle_aviator2)
-        
-        # Volta para a home para tentar o clique
         driver.get(URL_DO_SITE)
         sleep(6)
         
         try:
-            # Estratégia 1: Tentar clicar no card VIP
             card_aviator2 = WebDriverWait(driver, 8).until(
                 EC.element_to_be_clickable((By.XPATH, "//img[@alt='Aviator VIP']"))
             )
             card_aviator2.click()
             print("👉 Aviator 2 acessado via clique no card.")
         except Exception:
-            # Estratégia 2 (Redundância): Se falhar, força a URL VIP direta
             print("⚠️ Falha ao clicar no card do Aviator 2. Forçando navegação direta por link...")
             driver.get(LINK_AVIATOR_2)
             
         sleep(8) 
         driver.save_screenshot("aviator2_inicial.png")
-        print("📸 Print inicial 'aviator2_inicial.png' gerado com sucesso.")
-        print(f"✅ Aba Aviator 2 configurada.")
+        print("📸 Print inicial 'aviator2_inicial.png' gerado.")
         
-        # Deixa o driver posicionado na primeira aba
         driver.switch_to.window(handle_original)
         return {FIREBASE_PATH_ORIGINAL: handle_original, FIREBASE_PATH_2: handle_aviator2}
         
