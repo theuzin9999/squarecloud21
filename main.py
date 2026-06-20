@@ -32,7 +32,7 @@ STOP_EVENT = threading.Event()
 # 🔥 CONFIGURAÇÃO FIREBASE
 # =============================================================
 SERVICE_ACCOUNT_FILE = 'serviceAccountKey.json'
-DATABASE_URL = 'https://your-database.firebaseio.com'
+DATABASE_URL = 'https://history-dashboard-a70ee-default-rtdb.firebaseio.com'
 
 try:
     if not firebase_admin._apps:
@@ -61,7 +61,7 @@ TEMPO_MAX_INATIVIDADE = 360
 TZ_BR = pytz.timezone("America/Sao_Paulo")
 
 # =============================================================
-# 🔧 FUNÇÕES AUXILIARES E TRATAMENTO DE MODAIS / COOKIES
+# 🔧 FUNÇÕES AUXILIARES E TRATAMENTO DE MODAIS
 # =============================================================
 def run_diagnostics():
     print("\n--- 🕵️ DIAGNÓSTICO DE CONEXÃO ---")
@@ -108,8 +108,7 @@ def enviar_firebase_async(path, data):
     threading.Thread(target=_send, daemon=True).start()
 
 def verificar_modais_bloqueio(driver):
-    """Fecha ativamente modais conhecidos e o aviso de cookies na página principal"""
-    # 1. Fechar modal de Cookies da página principal (se houver antes do login)
+    """Fecha ativamente modais conhecidos e o aviso de cookies na página externa"""
     try:
         btn_cookies = driver.find_element(By.XPATH, "//button[contains(text(), 'ACEITAR TODOS') or contains(., 'ACEITAR TODOS')]")
         driver.execute_script("arguments[0].click();", btn_cookies)
@@ -117,30 +116,48 @@ def verificar_modais_bloqueio(driver):
         sleep(1)
     except: pass
 
-    # 2. Fechar modal de 18 Anos se estiver visível
     try:
         btn_18 = driver.find_element(By.XPATH, "//span[contains(text(), 'Sim, sou maior de 18')] | //button[contains(., 'Sim, sou maior de 18')]")
         driver.execute_script("arguments[0].click();", btn_18)
-        sleep(1.5)
+        sleep(1)
         print("✅ Modal 'Maior de 18' fechado.")
     except: pass
 
-    # 3. Fechar modal de Novo Cadastro usando o X (SVG)
     try:
         btn_fechar_cadastro = driver.find_element(By.XPATH, "//button[@data-slot='dialog-close'] | //button[contains(@class, 'modal-close')]")
         driver.execute_script("arguments[0].click();", btn_fechar_cadastro)
-        sleep(1.5)
+        sleep(1)
         print("✅ Modal 'Novo Cadastro' ocultado.")
     except: pass
 
 def checar_e_aceitar_cookies_iframe(driver):
-    """Detecta e limpa o banner de cookies específico que nasce preso dentro do iframe do Aviator"""
+    """
+    Detecta e limpa o banner de cookies específico da Spribe que nasce dentro de cada iframe.
+    Usa JavaScript direcionado para ignorar qualquer div absolute de degradê por cima.
+    """
     try:
-        btn_cookies_interno = driver.find_element(By.XPATH, "//button[contains(text(), 'ACEITAR TODOS') or contains(., 'ACEITAR TODOS')]")
-        if btn_cookies_interno.is_displayed():
+        btn_cookies_interno = None
+        xpaths_tentativas = [
+            "//button[contains(text(), 'ACEITAR TODOS') or contains(., 'ACEITAR TODOS')]",
+            "//button[contains(@class, 'success') or contains(@class, 'green')]",
+            "//div[contains(text(), 'Este site utiliza cookies')]/..//button",
+            "//button[./span[contains(text(), 'ACEITAR TODOS')]]"
+        ]
+        
+        for xpath in xpaths_tentativas:
+            try:
+                elemento = driver.find_element(By.開PATH, xpath) if hasattr(By, '開PATH') else driver.find_element(By.XPATH, xpath)
+                if elemento.is_displayed():
+                    btn_cookies_interno = elemento
+                    break
+            except:
+                continue
+
+        if btn_cookies_interno:
+            # Clique forçado via JS ignora a div absolute de efeito por cima e clica direto no botão
             driver.execute_script("arguments[0].click();", btn_cookies_interno)
             print("🛡️ [Iframe] Banner de cookies interno detectado e aceito com sucesso!")
-            sleep(1)
+            sleep(1.5)
     except:
         pass
 
@@ -183,7 +200,6 @@ def initialize_driver_instance():
     options.add_argument("--disable-blink-features=AutomationControlled")
 
     try:
-        # Forçando a versão fixa identificada na Square Cloud
         driver = uc.Chrome(options=options, version_main=148)
         
         stealth(driver,
@@ -207,15 +223,12 @@ def setup_tabs(driver):
         driver.get(URL_DO_SITE)
         sleep(12) 
         
-        # Limpa os modais e cookies da frente antes do login
         verificar_modais_bloqueio(driver)
 
-        # Localiza o botão Entrar por múltiplos seletores robustos
         botao_entrar = WebDriverWait(driver, 15).until(
             EC.presence_of_element_located((By.XPATH, "//button[contains(., 'Entrar')] | //a[contains(., 'Entrar')] | //*[text()='Entrar']"))
         )
         
-        # CLIQUE SEGURO VIA JAVASCRIPT: Ignora qualquer bloqueio visual na tela
         driver.execute_script("arguments[0].click();", botao_entrar)
         print("👉 Botão 'Entrar' clicado via JS com sucesso.")
         sleep(4)
@@ -237,12 +250,11 @@ def setup_tabs(driver):
         print(f"❌ ERRO CRÍTICO NAS ETAPAS DE LOGIN: {e}")
         try:
             driver.save_screenshot("erro_login.png")
-            print("📸 Print do erro salvo como 'erro_login.png'")
         except: pass
         return None
 
     # =============================================================
-    # 🔄 ABAS E REDUNDÂNCIA DE DIRECIONAMENTO (CLIQUE VS LINK)
+    # 🔄 DIRECIONAMENTO ABAS DOS JOGOS
     # =============================================================
     try:
         print("🎯 Configurando Aviator 1...")
@@ -259,7 +271,6 @@ def setup_tabs(driver):
         sleep(8) 
         handle_original = driver.current_window_handle
         driver.save_screenshot("aviator1_inicial.png")
-        print("📸 Print inicial 'aviator1_inicial.png' gerado.")
 
         print("🎯 Configurando Aviator 2 (VIP)...")
         driver.execute_script("window.open('');")
@@ -282,7 +293,6 @@ def setup_tabs(driver):
             
         sleep(8) 
         driver.save_screenshot("aviator2_inicial.png")
-        print("📸 Print inicial 'aviator2_inicial.png' gerado.")
         
         driver.switch_to.window(handle_original)
         return {FIREBASE_PATH_ORIGINAL: handle_original, FIREBASE_PATH_2: handle_aviator2}
@@ -326,7 +336,7 @@ def start_bot(driver, game_handle, firebase_path):
                 iframe, hist_element = find_game_elements_safe(driver)
                 
                 if iframe:
-                    # 🔥 Executa o clique de cookies dentro do iframe
+                    # 🔥 Limpa cirurgicamente os cookies de dentro do iframe antes de tentar ler
                     checar_e_aceitar_cookies_iframe(driver)
                 
                 if hist_element:
