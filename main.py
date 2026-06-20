@@ -81,10 +81,7 @@ def limpar_pngs_antigos():
             for f in arquivos_png:
                 os.remove(f)
             print(f"🧹 Limpeza concluída: {len(arquivos_png)} prints residuais deletados.")
-        else:
-            print("🧹 Limpeza concluída: Nenhum print antigo encontrado.")
-    except Exception as e:
-        print(f"⚠️ Erro ao limpar imagens antigas: {e}")
+    except: pass
 
 def getColorClass(value):
     try:
@@ -108,39 +105,33 @@ def enviar_firebase_async(path, data):
 
 def verificar_modais_bloqueio(driver):
     try:
-        btn_cookies = driver.find_element(By.開Xpath if False else By.XPATH, "//button[contains(text(), 'ACEITAR TODOS') or contains(., 'ACEITAR TODOS')]")
+        btn_cookies = driver.find_element(By.XPATH, "//button[contains(text(), 'ACEITAR TODOS') or contains(., 'ACEITAR TODOS')]")
         driver.execute_script("arguments[0].click();", btn_cookies)
-        print("✅ Banner de Cookies aceito.")
         sleep(1)
     except: pass
 
     try:
         btn_18 = driver.find_element(By.XPATH, "//span[contains(text(), 'Sim, sou maior de 18')] | //button[contains(., 'Sim, sou maior de 18')]")
         driver.execute_script("arguments[0].click();", btn_18)
-        sleep(1.5)
-        print("✅ Modal 'Maior de 18' fechado.")
+        sleep(1)
     except: pass
 
     try:
-        btn_fechar_cadastro = driver.find_element(By.XPATH, "//button[@data-slot='dialog-close'] | //button[contains(@class, 'modal-close')] | //button[contains(@class, 'goathbet-modal-close')]")
+        btn_fechar_cadastro = driver.find_element(By.XPATH, "//button[@data-slot='dialog-close'] | //button[contains(@class, 'goathbet-modal-close')]")
         driver.execute_script("arguments[0].click();", btn_fechar_cadastro)
-        sleep(1.5)
-        print("✅ Modal 'Novo Cadastro' ocultado.")
+        sleep(1)
     except: pass
 
 def stealth_script_inject(driver):
     stealth_js = """
-    Object.defineProperty(navigator, 'webdriver', {
-      get: () => false,
-    });
+    Object.defineProperty(navigator, 'webdriver', { get: () => false });
     """
     try:
         driver.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument', { 'source': stealth_js })
-    except Exception as e:
-        print(f"Aviso ao injetar stealth script: {e}")
+    except: pass
 
 # =============================================================
-# 🚀 DRIVER COM UNDETECTED-CHROMEDRIVER (FIXO 148 SQUARE)
+# 🚀 DRIVER COM UNDETECTED-CHROMEDRIVER
 # =============================================================
 def initialize_driver_instance():
     try:
@@ -153,14 +144,12 @@ def initialize_driver_instance():
 
     options = uc.ChromeOptions()
     options.page_load_strategy = 'eager'
-    
     options.add_argument("--headless=new")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-popup-blocking")
-    
     options.add_argument("--window-size=2560,1440")
-    options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
+    options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, Gecko) Chrome/126.0.0.0 Safari/537.36")
     options.add_argument("--disable-blink-features=AutomationControlled")
 
     try:
@@ -180,45 +169,38 @@ def initialize_driver_instance():
 
 def setup_tabs(driver):
     stealth_script_inject(driver)
-    
     print("➡️ Acessando site e configurando abas com Anti-Detecção UC...")
     try:
         driver.get(URL_DO_SITE)
         sleep(12) 
-        
         verificar_modais_bloqueio(driver)
 
         botao_entrar = WebDriverWait(driver, 15).until(
             EC.presence_of_element_located((By.XPATH, "//button[contains(., 'Entrar')] | //a[contains(., 'Entrar')] | //*[text()='Entrar']"))
         )
         driver.execute_script("arguments[0].click();", botao_entrar)
-        print("👉 Botão 'Entrar' clicado via JS.")
         sleep(4)
         
-        input_email = WebDriverWait(driver, 10).until(
-            EC.visibility_of_element_located((By.XPATH, "//input[@id='email' or @name='email']"))
-        )
-        input_email.send_keys(EMAIL)
-        
-        input_pass = driver.find_element(By.XPATH, "//input[@id='password' or @name='password']")
-        input_pass.send_keys(PASSWORD)
+        driver.find_element(By.XPATH, "//input[@id='email' or @name='email']").send_keys(EMAIL)
+        driver.find_element(By.XPATH, "//input[@id='password' or @name='password']").send_keys(PASSWORD)
         
         botao_submit = driver.find_element(By.XPATH, "//button[@type='submit']")
         driver.execute_script("arguments[0].click();", botao_submit)
-        print("✅ Formulário de login enviado.")
+        print("✅ Login enviado com sucesso.")
         sleep(15) 
     except Exception as e:
         print(f"❌ ERRO ETAPAS DE LOGIN: {e}")
         return None
 
     # =============================================================
-    # 🔄 DIRECIONAMENTO E CRIAÇÃO DE ABAS
+    # 🔄 DIRECIONAMENTO, VERIFICAÇÃO POR PRINT E CRIAÇÃO DE ABAS
     # =============================================================
     try:
         print("🎯 Configurando Aviator 1...")
         driver.get(LINK_AVIATOR_ORIGINAL)
         sleep(12) 
         handle_original = driver.current_window_handle
+        driver.save_screenshot("aviator1_sucesso.png") # 📸 COMPROVAÇÃO VISUAL ABA 1
 
         print("🎯 Configurando Aviator 2 (VIP)...")
         driver.execute_script("window.open('');")
@@ -228,6 +210,7 @@ def setup_tabs(driver):
         driver.switch_to.window(handle_aviator2)
         driver.get(LINK_AVIATOR_2)
         sleep(12) 
+        driver.save_screenshot("aviator2_sucesso.png") # 📸 COMPROVAÇÃO VISUAL ABA 2
         
         driver.switch_to.window(handle_original)
         return {FIREBASE_PATH_ORIGINAL: handle_original, FIREBASE_PATH_2: handle_aviator2}
@@ -237,16 +220,13 @@ def setup_tabs(driver):
         return None
 
 # =============================================================
-# 🎮 EXTRAÇÃO CONECTADA DIRETAMENTE AO IFRAME E AO SEU HTML
+# 🎮 CAPTURA DIRETA DO MULTIPLICADOR (IGUAL AO ANTIGO + XPATH)
 # =============================================================
 def capturar_multiplicador_headless(driver):
     try:
-        driver.implicitly_wait(0.5)
-        
-        # 1. Garante que estamos limpando o contexto e focando na raiz primeiro
+        driver.implicitly_wait(0.8)
         driver.switch_to.default_content()
         
-        # 2. Busca e entra no iframe do jogo
         iframes = driver.find_elements(By.TAG_NAME, 'iframe')
         iframe_alvo = None
         for frame in iframes:
@@ -260,12 +240,9 @@ def capturar_multiplicador_headless(driver):
             
         if iframe_alvo:
             driver.switch_to.frame(iframe_alvo)
-            
-            # 🎯 Mapeamento cirúrgico baseado no seu HTML real para contornar os comentários Angular ()
-            # Pega estritamente a primeira ocorrência da div payout visível
+            # XPath limpo e robusto ignorando comentários Angular ()
             first_payout = driver.find_element(By.XPATH, "(//div[contains(@class, 'payout')])[1]")
-            texto = first_payout.get_attribute("innerText") or first_payout.text
-            return texto
+            return first_payout.text or first_payout.get_attribute("innerText")
             
         return None
     except:
@@ -276,11 +253,10 @@ def capturar_multiplicador_headless(driver):
 # =============================================================
 def start_bot(driver, game_handle, firebase_path):
     nome_log = "AVIATOR 1" if "history" in firebase_path else "AVIATOR 2"
-    print(f"🚀 INICIADO EM EXTRAÇÃO DE DADOS: {nome_log}")
+    print(f"🚀 EXTRAÇÃO ATIVA: {nome_log}")
     
     LAST_SENT = None
     ULTIMO_MULTIPLIER_TIME = time()
-    alertou_falha = False
 
     while not STOP_EVENT.is_set():
         raw_text = None
@@ -289,15 +265,10 @@ def start_bot(driver, game_handle, firebase_path):
             try:
                 driver.switch_to.window(game_handle)
                 raw_text = capturar_multiplicador_headless(driver)
-                
-                if not raw_text and not alertou_falha:
-                    print(f"⏳ [{nome_log}] Buscando conexão com o painel interno de resultados...")
-                    alertou_falha = True
             except:
                 pass
 
         if raw_text:
-            alertou_falha = False
             clean_text = raw_text.strip().lower().replace('x', '').replace('\n', '').strip()
             if clean_text:
                 try:
@@ -318,7 +289,7 @@ def start_bot(driver, game_handle, firebase_path):
                 except: pass 
 
         if (time() - ULTIMO_MULTIPLIER_TIME) > TEMPO_MAX_INATIVIDADE:
-            print(f"⚠️ [{nome_log}] Sem novos dados capturados por {TEMPO_MAX_INATIVIDADE}s. Reiniciando ciclo de rede...")
+            print(f"⚠️ [{nome_log}] Inatividade detectada. Reiniciando ciclo...")
             STOP_EVENT.set()
             return 
             
@@ -330,7 +301,6 @@ def start_bot(driver, game_handle, firebase_path):
 def rodar_ciclo_monitoramento():
     DRIVER = None
     STOP_EVENT.clear() 
-    
     limpar_pngs_antigos()
     
     try:
@@ -338,20 +308,17 @@ def rodar_ciclo_monitoramento():
         DRIVER = initialize_driver_instance()
         
         if not DRIVER:
-            print("⚠️ Falha ao instanciar o driver. Aguardando...")
             sleep(10)
             return
 
         handles = setup_tabs(DRIVER)
-        
         if not handles:
-            print("⚠️ Ciclo interrompido por falha de navegação. Reiniciando driver...")
             return
 
         handle_original = handles[FIREBASE_PATH_ORIGINAL]
         handle_aviator2 = handles[FIREBASE_PATH_2]
 
-        print("⏳ Monitoramento iniciado e pareado com as Threads com sucesso...")
+        print("⏳ Pareando e iniciando threads de monitoramento...")
         
         t1 = threading.Thread(target=start_bot, args=(DRIVER, handle_original, FIREBASE_PATH_ORIGINAL), daemon=True)
         t2 = threading.Thread(target=start_bot, args=(DRIVER, handle_aviator2, FIREBASE_PATH_2), daemon=True)
