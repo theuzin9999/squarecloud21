@@ -11,16 +11,7 @@ from selenium.webdriver.support import expected_conditions as EC
 import firebase_admin
 from firebase_admin import credentials, db
 
-# CONFIGURAÇÃO FIREBASE
-SERVICE_ACCOUNT_FILE = 'serviceAccountKey.json'
-DATABASE_URL = 'https://history-dashboard-a70ee-default-rtdb.firebaseio.com'
-if not firebase_admin._apps:
-    firebase_admin.initialize_app(credentials.Certificate(SERVICE_ACCOUNT_FILE), {'databaseURL': DATABASE_URL})
-
-# CONFIGURAÇÕES
-URL_LOGIN = "https://go.goathbet.com/c/7vo"
-LINK_AVIATOR_1 = "https://www.goathbet.bet/casino/spribe/aviator"
-TZ_BR = pytz.timezone("America/Sao_Paulo")
+# ... (Configurações de Firebase permanecem iguais) ...
 
 def get_driver():
     options = Options()
@@ -28,52 +19,33 @@ def get_driver():
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--window-size=1920,1080")
-    # Define o caminho do binário do servidor e evita conflitos de driver
+    options.add_argument("user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
     options.binary_location = "/usr/bin/chromium"
-    
-    # Inicia sem o webdriver-manager para evitar erros de versão
-    driver = webdriver.Chrome(options=options)
-    return driver
+    return webdriver.Chrome(options=options)
 
 def realizar_login(driver):
     driver.get(URL_LOGIN)
-    time.sleep(10)
-    try:
-        driver.find_element(By.XPATH, "//input[@id='email' or @name='email']").send_keys(os.getenv("EMAIL"))
-        driver.find_element(By.XPATH, "//input[@id='password' or @name='password']").send_keys(os.getenv("PASSWORD"))
-        driver.find_element(By.XPATH, "//button[@type='submit']").click()
-        time.sleep(15)
-    except Exception as e:
-        print(f"Erro no login: {e}")
-
-def monitorar_jogo(driver, url, path_firebase):
-    driver.get(url)
-    last_val = None
-    while True:
-        try:
-            # Aguarda o iframe carregar e alterna para ele
-            iframe = WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.XPATH, '//iframe[contains(@src, "spribe")]')))
-            driver.switch_to.frame(iframe)
-            
-            # Localiza o elemento do multiplicador
-            elemento = WebDriverWait(driver, 15).until(EC.visibility_of_element_located((By.CSS_SELECTOR, ".payouts-block, .bubble-multiplier")))
-            
-            val_text = elemento.text.replace('x', '').strip()
-            if val_text and val_text != last_val:
-                last_val = val_text
-                payload = {"multiplier": val_text, "time": datetime.now(TZ_BR).strftime("%H:%M:%S")}
-                db.reference(path_firebase).push(payload)
-                print(f"Coletado {path_firebase}: {val_text}")
-            
-            driver.switch_to.default_content()
-        except Exception:
-            driver.get(url)
-        time.sleep(2)
-
-if __name__ == "__main__":
-    driver = get_driver()
-    realizar_login(driver)
-    threading.Thread(target=monitorar_jogo, args=(driver, LINK_AVIATOR_1, "history"), daemon=True).start()
+    print("⏳ Aguardando carregamento da página de login...")
     
-    while True:
-        time.sleep(60)
+    # Aumentamos o tempo de espera para 30 segundos e usamos WebDriverWait
+    wait = WebDriverWait(driver, 30)
+    
+    try:
+        # Tenta encontrar o campo por diferentes seletores comuns
+        campo_email = wait.until(EC.presence_of_element_located((By.XPATH, "//input[@type='email' or @name='email' or @id='email']")))
+        campo_email.send_keys(os.getenv("EMAIL"))
+        
+        campo_pass = driver.find_element(By.XPATH, "//input[@type='password' or @name='password' or @id='password']")
+        campo_pass.send_keys(os.getenv("PASSWORD"))
+        
+        btn_submit = driver.find_element(By.XPATH, "//button[@type='submit']")
+        btn_submit.click()
+        
+        print("✅ Login enviado com sucesso.")
+        time.sleep(15) # Espera o redirecionamento pós-login
+    except Exception as e:
+        # Se falhar, salva um print para debug na Square Cloud
+        driver.save_screenshot("erro_login.png")
+        print(f"❌ Erro crítico ao localizar elementos de login: {e}")
+
+# ... (restante do código igual)
