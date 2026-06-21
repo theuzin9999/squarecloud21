@@ -1,6 +1,8 @@
 import os
 import sys
 import pytz
+import logging
+import threading
 import gc
 import requests
 import subprocess
@@ -13,51 +15,77 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
 
+# 🔥 BIBLIOTECA DE CAMUFLAGEM
 import undetected_chromedriver as uc
 from selenium_stealth import stealth
 
 import firebase_admin
 from firebase_admin import credentials, db
 
+# =============================================================
+# ⚠️ CONTROLE GLOBAL DE THREADS E DRIVER
+# =============================================================
+DRIVER_LOCK = threading.Lock() 
+STOP_EVENT = threading.Event() 
+
+# =============================================================
+# 🔥 CONFIGURAÇÃO FIREBASE
+# =============================================================
 SERVICE_ACCOUNT_FILE = 'serviceAccountKey.json'
 DATABASE_URL = 'https://history-dashboard-a70ee-default-rtdb.firebaseio.com'
 
-if not firebase_admin._apps:
-    cred = credentials.Certificate(SERVICE_ACCOUNT_FILE)
-    firebase_admin.initialize_app(cred, {'databaseURL': DATABASE_URL})
+try:
+    if not firebase_admin._apps:
+        cred = credentials.Certificate(SERVICE_ACCOUNT_FILE)
+        firebase_admin.initialize_app(cred, {'databaseURL': DATABASE_URL})
+    print("✅ Firebase Admin SDK inicializado.")
+except Exception as e:
+    print(f"\n❌ ERRO CONEXÃO FIREBASE: {e}")
+    sys.exit()
 
+# =============================================================
+# ⚙️ VARIÁVEIS OFICIAIS GOATHBET
+# =============================================================
 URL_DO_SITE = "https://www.goathbet.com"
-LINK_AVIATOR = "https://www.goathbet.bet/casino/spribe/aviator-vip"
-FIREBASE_PATH = "aviator2"
+LINK_AVIATOR_ORIGINAL = "https://www.goathbet.com/pt/casino/spribe/aviator"
+LINK_AVIATOR_2 = "https://www.goathbet.com/pt/casino/spribe/aviator-2"
+
+FIREBASE_PATH_ORIGINAL = "history"
+FIREBASE_PATH_2 = "aviator2"
 
 EMAIL = os.getenv("EMAIL")
 PASSWORD = os.getenv("PASSWORD")
 
-POLLING_INTERVAL = 1.0
-TEMPO_MAX_INATIVIDADE = 360
+POLLING_INTERVAL = 1.0       
+TEMPO_MAX_INATIVIDADE = 360 
 TZ_BR = pytz.timezone("America/Sao_Paulo")
-HORA_REINICIO = 23
-MINUTO_REINICIO = 59
 
+# =============================================================
+# 🔧 FUNÇÕES AUXILIARES E TRATAMENTO DE MODAIS
+# =============================================================
 def run_diagnostics():
     print("\n--- 🕵️ DIAGNÓSTICO DE CONEXÃO ---")
     try:
         ip = requests.get('https://api.ipify.org', timeout=10).text
+        print(f"🌐 IP Público: {ip}")
         res = requests.get(URL_DO_SITE, timeout=10, headers={'User-Agent': 'Mozilla/5.0'})
-        print(f"🌐 IP: {ip} | Status Site: {res.status_code}")
+        print(f"📡 Status Site (Requests normal): {res.status_code}")
     except Exception as e:
         print(f"⚠️ Alerta de Rede: {e}")
     print("----------------------------------\n")
 
 def limpar_pngs_antigos():
+    """🧹 Remove todos os prints da raiz a cada reinício para economizar espaço"""
     try:
         arquivos_png = glob.glob("*.png")
-        for f in arquivos_png:
-            os.remove(f)
         if arquivos_png:
-            print(f"🧹 {len(arquivos_png)} prints deletados.")
+            for f in arquivos_png:
+                os.remove(f)
+            print(f"🧹 Limpeza concluída: {len(arquivos_png)} prints residuais deletados.")
+        else:
+            print("🧹 Limpeza concluída: Nenhum print antigo encontrado.")
     except Exception as e:
-        print(f"⚠️ Erro ao limpar: {e}")
+        print(f"⚠️ Erro ao limpar imagens antigas: {e}")
 
 def getColorClass(value):
     try:
@@ -72,60 +100,63 @@ def enviar_firebase_async(path, data):
     def _send():
         try:
             db.reference(path).set(data)
-            print(f"🔥 AVIATOR 2: {data['multiplier']}x às {data['time']}")
+            nome_jogo = path.split('/')[0].upper()
+            if nome_jogo == "HISTORY": nome_jogo = "AVIATOR 1"
+            print(f"🔥 {nome_jogo}: {data['multiplier']}x às {data['time']}")
         except Exception:
-            pass
-    import threading
+            pass 
     threading.Thread(target=_send, daemon=True).start()
 
 def verificar_modais_bloqueio(driver):
-    for tentativa in range(3):
-        fechou_algo = False
-        try:
-            btn = driver.find_element(By.XPATH, "//button[contains(text(), 'ACEITAR TODOS') or contains(., 'ACEITAR TODOS')]")
-            driver.execute_script("arguments[0].click();", btn)
-            print("✅ Cookies geral aceito.")
-            sleep(2)
-            fechou_algo = True
-        except: pass
-        try:
-            btn = driver.find_element(By.XPATH, "//span[contains(text(), 'Sim, sou maior de 18')] | //button[contains(., 'Sim, sou maior de 18')]")
-            driver.execute_script("arguments[0].click();", btn)
-            print("✅ Modal 18+ fechado.")
-            sleep(2)
-            fechou_algo = True
-        except: pass
-        try:
-            btn = driver.find_element(By.XPATH, "//button[@data-slot='dialog-close'] | //button[contains(@class, 'modal-close')]")
-            driver.execute_script("arguments[0].click();", btn)
-            print("✅ Modal cadastro ocultado.")
-            sleep(2)
-            fechou_algo = True
-        except: pass
-        if not fechou_algo:
-            break
-        sleep(2)
+    """Fecha ativamente modais conhecidos e o aviso de cookies na página externa"""
+    try:
+        btn_cookies = driver.find_element(By.XPATH, "//button[contains(text(), 'ACEITAR TODOS') or contains(., 'ACEITAR TODOS')]")
+        driver.execute_script("arguments[0].click();", btn_cookies)
+        print("✅ Banner de Cookies geral aceito.")
+        sleep(1)
+    except: pass
+
+    try:
+        btn_18 = driver.find_element(By.XPATH, "//span[contains(text(), 'Sim, sou maior de 18')] | //button[contains(., 'Sim, sou maior de 18')]")
+        driver.execute_script("arguments[0].click();", btn_18)
+        sleep(1)
+        print("✅ Modal 'Maior de 18' fechado.")
+    except: pass
+
+    try:
+        btn_fechar_cadastro = driver.find_element(By.XPATH, "//button[@data-slot='dialog-close'] | //button[contains(@class, 'modal-close')]")
+        driver.execute_script("arguments[0].click();", btn_fechar_cadastro)
+        sleep(1)
+        print("✅ Modal 'Novo Cadastro' ocultado.")
+    except: pass
 
 def checar_e_aceitar_cookies_iframe(driver, estado_cookies):
+    """
+    Detecta e limpa o banner de cookies específico da Spribe que nasce dentro de cada iframe.
+    Usa uma trava local para clicar apenas uma vez e não entrar em loop.
+    """
     if estado_cookies.get('aceito', False):
         return
+
     try:
-        btn = None
-        xpaths = [
+        btn_cookies_interno = None
+        xpaths_tentativas = [
             "//button[contains(text(), 'ACEITAR TODOS') or contains(., 'ACEITAR TODOS')]",
             "//button[contains(@class, 'success') or contains(@class, 'green')]",
             "//button[./span[contains(text(), 'ACEITAR TODOS')]]"
         ]
-        for xpath in xpaths:
+        
+        for xpath in xpaths_tentativas:
             try:
-                el = driver.find_element(By.XPATH, xpath)
-                if el.is_displayed() and el.size['width'] > 0:
-                    btn = el
+                elemento = driver.find_element(By.XPATH, xpath)
+                if elemento.is_displayed() and elemento.size['width'] > 0:
+                    btn_cookies_interno = elemento
                     break
             except:
                 continue
-        if btn:
-            driver.execute_script("arguments[0].click();", btn)
+
+        if btn_cookies_interno:
+            driver.execute_script("arguments[0].click();", btn_cookies_interno)
             print("🛡️ [Iframe] Banner de cookies interno limpo com sucesso!")
             estado_cookies['aceito'] = True
             sleep(2)
@@ -133,118 +164,145 @@ def checar_e_aceitar_cookies_iframe(driver, estado_cookies):
         pass
 
 def stealth_script_inject(driver):
-    stealth_js = "Object.defineProperty(navigator, 'webdriver', { get: () => false, });"
+    """Injeta script adicional para mascarar o Selenium"""
+    stealth_js = """
+    Object.defineProperty(navigator, 'webdriver', {
+      get: () => false,
+    });
+    """
     try:
-        driver.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument', {'source': stealth_js})
+        driver.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument', {
+            'source': stealth_js
+        })
     except Exception as e:
-        print(f"Aviso stealth: {e}")
+        print(f"Aviso ao injetar stealth script: {e}")
 
-def initialize_driver():
+# =============================================================
+# 🚀 DRIVER COM UNDETECTED-CHROMEDRIVER
+# =============================================================
+def initialize_driver_instance():
     try:
-        if os.name == 'nt':
+        if os.name == 'nt': 
             subprocess.run("taskkill /f /im chromedriver.exe", shell=True, stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
             subprocess.run("taskkill /f /im chrome.exe", shell=True, stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
         else:
             subprocess.run("killall -9 chromium-browser chromium chromedriver 2>/dev/null", shell=True)
     except: pass
-    sleep(2)
 
     options = uc.ChromeOptions()
     options.page_load_strategy = 'eager'
+    
     options.add_argument("--headless=new")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-popup-blocking")
+    
     options.add_argument("--window-size=1920,1080")
     options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
     options.add_argument("--disable-blink-features=AutomationControlled")
 
     try:
-        driver = uc.Chrome(options=options, version_main=148, use_subprocess=False)
+        driver = uc.Chrome(options=options, version_main=148)
+        
         stealth(driver,
-            languages=["pt-BR", "pt"], vendor="Google Inc.", platform="Win32",
-            webgl_vendor="Intel Inc.", renderer="Intel Iris OpenGL Engine", fix_hairline=True)
+            languages=["pt-BR", "pt"],
+            vendor="Google Inc.",
+            platform="Win32",
+            webgl_vendor="Intel Inc.",
+            renderer="Intel Iris OpenGL Engine",
+            fix_hairline=True,
+        )
         return driver
     except Exception as e:
-        print(f"⚠️ Erro driver: {e}")
+        print(f"⚠️ Erro ao instalar/iniciar driver: {e}")
         return None
 
-def setup_navegador(driver):
-    nome = "Aviator 2"
-    print(f"➡️ Configurando {nome}...")
+def setup_tabs(driver):
+    stealth_script_inject(driver)
+    
+    print("➡️ Acessando site e configurando abas com Anti-Detecção UC...")
     try:
-        print(f"[{nome}] Acessando site principal...")
         driver.get(URL_DO_SITE)
-        sleep(20)
+        sleep(12) 
+        
         verificar_modais_bloqueio(driver)
-        verificar_modais_bloqueio(driver)
 
-        print(f"[{nome}] Procurando botão Entrar (timeout 30s)...")
-        botao_entrar = None
-        for tentativa in range(3):
-            try:
-                botao_entrar = WebDriverWait(driver, 10).until(
-                    EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Entrar')] | //a[contains(., 'Entrar')] | //*[text()='Entrar']"))
-                )
-                break
-            except:
-                print(f"[{nome}] Aguardando botão Entrar... ({tentativa+1}/3)")
-                sleep(5)
-                verificar_modais_bloqueio(driver)
-
-        if not botao_entrar:
-            print(f"[{nome}] ❌ Botão Entrar não encontrado após 3 tentativas.")
-            return False
-
+        botao_entrar = WebDriverWait(driver, 15).until(
+            EC.presence_of_element_located((By.開PATH if hasattr(By, '開PATH') else By.XPATH, "//button[contains(., 'Entrar')] | //a[contains(., 'Entrar')] | //*[text()='Entrar']"))
+        )
+        
         driver.execute_script("arguments[0].click();", botao_entrar)
-        print(f"[{nome}] Botão Entrar clicado.")
-        sleep(6)
-        verificar_modais_bloqueio(driver)
-
-        print(f"[{nome}] Preenchendo login...")
-        input_email = WebDriverWait(driver, 15).until(
+        print("👉 Botão 'Entrar' clicado via JS com sucesso.")
+        sleep(4)
+        
+        input_email = WebDriverWait(driver, 10).until(
             EC.visibility_of_element_located((By.XPATH, "//input[@id='email' or @name='email']"))
         )
-        input_email.clear()
         input_email.send_keys(EMAIL)
+        
         input_pass = driver.find_element(By.XPATH, "//input[@id='password' or @name='password']")
-        input_pass.clear()
         input_pass.send_keys(PASSWORD)
+        
         botao_submit = driver.find_element(By.XPATH, "//button[@type='submit']")
         driver.execute_script("arguments[0].click();", botao_submit)
-        print(f"✅ [{nome}] Login enviado.")
-        sleep(20)
-        verificar_modais_bloqueio(driver)
-
-        print(f"[{nome}] Acessando jogo VIP...")
-        driver.get(LINK_AVIATOR)
-        sleep(15)
-
-        print(f"[{nome}] Verificando iframe (5 tentativas)...")
-        for i in range(5):
-            if driver.find_elements(By.XPATH, '//iframe[contains(@src, "spribe") or contains(@src, "aviator")]'):
-                print(f"✅ [{nome}] Iframe encontrado.")
-                break
-            print(f"⏳ [{nome}] Aguardando iframe... ({i+1}/5)")
-            try:
-                driver.get(LINK_AVIATOR)
-            except:
-                pass
-            sleep(7)
-
-        driver.save_screenshot("aviator2_aberto.png")
-        print(f"📸 [{nome}] Screenshot salvo.")
-        print(f"✅ [{nome}] Configurado com sucesso.")
-        return True
+        
+        print("✅ Formulário de login enviado.")
+        sleep(12) 
     except Exception as e:
-        print(f"❌ ERRO CRÍTICO {nome}: {e}")
-        print(traceback.format_exc())
+        print(f"❌ ERRO CRÍTICO NAS ETAPAS DE LOGIN: {e}")
         try:
-            driver.save_screenshot(f"erro_aviator2.png")
+            driver.save_screenshot("erro_login.png")
         except: pass
-        return False
+        return None
 
-def find_game_elements(driver):
+    # =============================================================
+    # 🔄 DIRECIONAMENTO ABAS DOS JOGOS
+    # =============================================================
+    try:
+        print("🎯 Configurando Aviator 1...")
+        try:
+            card_aviator1 = WebDriverWait(driver, 8).until(
+                EC.element_to_be_clickable((By.XPATH, "//img[@alt='Aviator']"))
+            )
+            card_aviator1.click()
+        except Exception:
+            print("⚠️ Falha ao clicar no card. Navegando diretamente...")
+            driver.get(LINK_AVIATOR_ORIGINAL)
+            
+        sleep(10) 
+        handle_original = driver.current_window_handle
+        print(f"✅ Aba Aviator 1 configurada.")
+        driver.save_screenshot("aviator1_inicial.png")
+
+        print("🎯 Configurando Aviator 2 (VIP)...")
+        driver.execute_script("window.open('');")
+        handles = driver.window_handles
+        handle_aviator2 = [h for h in handles if h != handle_original][0]
+        
+        driver.switch_to.window(handle_aviator2)
+        driver.get(LINK_AVIATOR_2)
+        sleep(12)
+        
+        # Retry: tenta localizar iframe várias vezes
+        print(f"🔍 [DEBUG] URL Aviator 2: {driver.current_url}")
+        for retry in range(3):
+            if driver.find_elements(By.XPATH, '//iframe[contains(@src, "spribe") or contains(@src, "aviator")]'):
+                break
+            print(f"⏳ Aguardando iframe Aviator 2... (tentativa {retry+1}/3)")
+            sleep(5)
+        
+        print(f"✅ Aba Aviator 2 configurada.")
+        driver.switch_to.window(handle_original)
+        return {FIREBASE_PATH_ORIGINAL: handle_original, FIREBASE_PATH_2: handle_aviator2}
+        
+    except Exception as e:
+        print(f"⚠️ Falha fatal ao estruturar as páginas internas do jogo: {e}")
+        return None
+
+# =============================================================
+# 🎮 BUSCA DE ELEMENTOS
+# =============================================================
+def find_game_elements_safe(driver):
     try:
         driver.implicitly_wait(2)
         iframe = driver.find_element(By.XPATH, '//iframe[contains(@src, "spribe") or contains(@src, "aviator")]')
@@ -252,58 +310,46 @@ def find_game_elements(driver):
         hist = driver.find_element(By.CSS_SELECTOR, ".payouts-block, app-stats-widget")
         driver.implicitly_wait(10)
         return iframe, hist
-    except:
+    except Exception as e:
         driver.implicitly_wait(10)
         return None, None
 
-def start_coleta(driver):
-    print(f"🚀 [AVIATOR 2] Monitorando '{FIREBASE_PATH}'...")
+# =============================================================
+# 🔄 LOOP DE CAPTURA COM SUPORTE ANTIBLOCK COOKIES
+# =============================================================
+def start_bot(driver, game_handle, firebase_path):
+    nome_log = "AVIATOR 1" if "history" in firebase_path else "AVIATOR 2"
+    print(f"🚀 [{nome_log}] Monitorando '{firebase_path}'...")
+    
     LAST_SENT = None
     ULTIMO_MULTIPLIER_TIME = time()
     data_atual = datetime.now(TZ_BR).date()
-    estado_cookies = {'aceito': False}
-    contador_debug = 0
 
-    while True:
+    while not STOP_EVENT.is_set():
         now_br = datetime.now(TZ_BR)
-        if (now_br.hour == HORA_REINICIO and now_br.minute >= MINUTO_REINICIO) or (now_br.hour == 0 and now_br.minute <= 5 and now_br.date() != data_atual):
-            print(f"🌙 [AVIATOR 2] Reinício diário ({HORA_REINICIO}:{MINUTO_REINICIO:02d})...")
-            break
-
+        if now_br.hour == 0 and now_br.minute <= 5 and now_br.date() != data_atual:
+            print(f"🌙 [{nome_log}] Reinício diário (00:00)...")
+            return
+        
         raw_text = None
-        try:
-            driver.switch_to.window(driver.current_window_handle)
-            driver.switch_to.default_content()
-            if contador_debug % 10 == 0:
-                print(f"🔍 [DEBUG AVIATOR 2] URL: {driver.current_url} | Title: {driver.title}")
-            contador_debug += 1
-
-            iframe, hist_element = find_game_elements(driver)
-
-            if not iframe:
-                if contador_debug % 10 == 0:
-                    print(f"⚠️ [AVIATOR 2] Iframe NÃO encontrado.")
-            else:
-                checar_e_aceitar_cookies_iframe(driver, estado_cookies)
-
-            if not hist_element:
-                if contador_debug % 30 == 0:
-                    print(f"⚠️ [AVIATOR 2] Elemento histórico NÃO encontrado.")
-            else:
-                try:
+        with DRIVER_LOCK:
+            if STOP_EVENT.is_set(): break
+            try:
+                driver.switch_to.window(game_handle)
+                driver.switch_to.default_content()
+                iframe, hist_element = find_game_elements_safe(driver)
+                
+                if iframe:
+                    checar_e_aceitar_cookies_iframe(driver, {'aceito': False})
+                
+                if hist_element:
                     first_payout = hist_element.find_element(
                         By.CSS_SELECTOR, ".payout:first-child, .bubble-multiplier:first-child"
                     )
                     raw_text = first_payout.get_attribute("innerText")
-                    if not raw_text and contador_debug % 30 == 0:
-                        print(f"⚠️ [AVIATOR 2] first_payout vazio.")
-                except Exception as e:
-                    if contador_debug % 30 == 0:
-                        print(f"⚠️ [AVIATOR 2] Erro ao buscar payout: {e}")
-        except Exception as e:
-            if contador_debug % 30 == 0:
-                print(f"⚠️ [AVIATOR 2] Exceção: {e}")
-
+            except Exception as e:
+                pass
+        
         if raw_text:
             clean_text = raw_text.strip().lower().replace('x', '').replace('\n', '').strip()
             if clean_text:
@@ -316,55 +362,94 @@ def start_coleta(driver):
                             "color": getColorClass(novo_valor),
                             "date": now_br.strftime("%Y-%m-%d")
                         }
-                        import uuid
-                        key = now_br.strftime("%Y-%m-%d_%H-%M-%S") + "-" + str(uuid.uuid4().hex)[:8]
-                        enviar_firebase_async(f"{FIREBASE_PATH}/{key}", payload)
-                        print(f"🔥 [AVIATOR 2] {payload['multiplier']}x")
+                        key = now_br.strftime("%Y-%m-%d_%H-%M-%S-%f").replace('.', '-')
+                        enviar_firebase_async(f"{firebase_path}/{key}", payload)
+                        print(f"🔥 [{nome_log}] {payload['multiplier']}x")
                         LAST_SENT = novo_valor
                         ULTIMO_MULTIPLIER_TIME = time()
                 except: pass
 
         if (time() - ULTIMO_MULTIPLIER_TIME) > TEMPO_MAX_INATIVIDADE:
-            print(f"⚠️ [AVIATOR 2] Sem dados por {TEMPO_MAX_INATIVIDADE}s.")
-            break
-
+            print(f"⚠️ [{nome_log}] Sem dados por {TEMPO_MAX_INATIVIDADE}s. Reiniciando...")
+            STOP_EVENT.set()
+            return
+            
         sleep(POLLING_INTERVAL + 0.5)
 
-def main():
-    run_diagnostics()
-    if not EMAIL or not PASSWORD:
-        print("❗ Configure EMAIL e PASSWORD.")
-        sys.exit()
-    print("==============================================")
-    print("     AVIATOR 2 (VIP) - INICIADO (24H)        ")
-    print("==============================================")
+# =============================================================
+# 🚀 SUPERVISOR (MAIN LOOP)
+# =============================================================
+def rodar_ciclo_monitoramento():
+    DRIVER = None
+    STOP_EVENT.clear() 
+    
     limpar_pngs_antigos()
+    
+    try:
+        print("\n🔵 INICIANDO NOVO CICLO COM UNDETECTED-CHROMEDRIVER...")
+        DRIVER = initialize_driver_instance()
+        
+        if not DRIVER:
+            print("⚠️ Falha ao instanciar o driver. Aguardando para nova tentativa...")
+            sleep(10)
+            return
 
-    while True:
-        driver = None
-        try:
-            print("\n🔵 Iniciando ciclo Aviator 2...")
-            driver = initialize_driver()
-            if not driver:
-                print("⚠️ Falha driver. Aguardando...")
-                sleep(15)
-                continue
+        handles = setup_tabs(DRIVER)
+        
+        if not handles:
+            print("⚠️ Ciclo interrompido por falha de autenticação. Reiniciando driver...")
+            return
 
-            if setup_navegador(driver):
-                start_coleta(driver)
-            else:
-                print("⚠️ Falha setup. Reiniciando...")
-        except Exception as e:
-            print(f"\n❌ ERRO CICLO AVIATOR 2: {e}")
-            traceback.print_exc()
-        finally:
-            if driver:
-                try:
-                    driver.quit()
-                    print("🗑️ Driver Aviator 2 encerrado.")
-                except: pass
-            gc.collect()
-            sleep(5)
+        handle_original = handles[FIREBASE_PATH_ORIGINAL]
+        handle_aviator2 = handles[FIREBASE_PATH_2]
+
+        print("⏳ Monitoramento iniciado (Threads)...")
+        
+        t1 = threading.Thread(target=start_bot, args=(DRIVER, handle_original, FIREBASE_PATH_ORIGINAL), daemon=True)
+        t2 = threading.Thread(target=start_bot, args=(DRIVER, handle_aviator2, FIREBASE_PATH_2), daemon=True)
+
+        t1.start()
+        t2.start()
+
+        while t1.is_alive() or t2.is_alive():
+            if STOP_EVENT.is_set():
+                break
+            sleep(2)
+            
+        print("🛑 Ciclo encerrado. Limpando recursos...")
+        
+    except Exception as e:
+        print(f"\n❌ ERRO NO CICLO: {e}")
+        traceback.print_exc()
+    finally:
+        STOP_EVENT.set() 
+        if DRIVER:
+            try:
+                DRIVER.quit()
+                print("🗑️ Driver encerrado com sucesso.")
+            except: pass
+        gc.collect()
+        sleep(5) 
 
 if __name__ == "__main__":
-    main()
+    run_diagnostics()
+    
+    if not EMAIL or not PASSWORD:
+        print("❗ Configure EMAIL e PASSWORD nas variáveis de ambiente.")
+        sys.exit()
+    
+    print("==============================================")
+    print("     SUPERVISOR DE BOT INICIADO (24H)        ")
+    print("==============================================")
+
+    while True:
+        try:
+            rodar_ciclo_monitoramento()
+            print("♻️ Reiniciando processo em 5 segundos...\n")
+            sleep(5)
+        except KeyboardInterrupt:
+            print("\n🚫 Parada manual pelo usuário.")
+            break
+        except Exception as e:
+            print(f"❌ Erro crítico no Supervisor: {e}")
+            sleep(10)
