@@ -252,67 +252,96 @@ def setup_navegador_unico(driver, url_jogo, nome_jogo):
     Retorna o driver pronto ou None em caso de falha.
     """
     print(f"➡️ Configurando {nome_jogo} em navegador dedicado...")
-    try:
-        print(f"[{nome_jogo}] Acessando site principal...")
-        driver.get(URL_DO_SITE)
-        sleep(12)
-        
-        verificar_modais_bloqueio(driver)
-
-        botao_entrar = WebDriverWait(driver, 15).until(
-            EC.presence_of_element_located((By.XPATH, "//button[contains(., 'Entrar')] | //a[contains(., 'Entrar')] | //*[text()='Entrar']"))
-        )
-        
-        driver.execute_script("arguments[0].click();", botao_entrar)
-        print(f"👉 [{nome_jogo}] Botão 'Entrar' clicado via JS.")
-        sleep(4)
-        
-        print(f"[{nome_jogo}] Preenchendo credenciais...")
-        input_email = WebDriverWait(driver, 10).until(
-            EC.visibility_of_element_located((By.XPATH, "//input[@id='email' or @name='email']"))
-        )
-        input_email.clear()
-        input_email.send_keys(EMAIL)
-        
-        input_pass = driver.find_element(By.XPATH, "//input[@id='password' or @name='password']")
-        input_pass.clear()
-        input_pass.send_keys(PASSWORD)
-        
-        botao_submit = driver.find_element(By.XPATH, "//button[@type='submit']")
-        driver.execute_script("arguments[0].click();", botao_submit)
-        
-        print(f"✅ [{nome_jogo}] Formulário de login enviado.")
-        sleep(12)
-        
-        print(f"[{nome_jogo}] Acessando jogo: {url_jogo}")
-        driver.get(url_jogo)
-        sleep(12)
-        
-        print(f"[{nome_jogo}] Verificando iframe do jogo...")
-        for retry in range(5):
-            if driver.find_elements(By.XPATH, '//iframe[contains(@src, "spribe") or contains(@src, "aviator")]'):
-                print(f"✅ [{nome_jogo}] Iframe encontrado.")
-                break
-            print(f"⏳ [{nome_jogo}] Aguardando iframe... (tentativa {retry+1}/5)")
-            sleep(3)
-        else:
-            print(f"⚠️ [{nome_jogo}] Iframe não encontrado após 5 tentativas, mas continuando...")
-        
-        driver.save_screenshot(f"{nome_jogo.replace(' ', '_')}_aberto.png")
-        print(f"📸 [{nome_jogo}] Screenshot salvo.")
-        
-        print(f"✅ [{nome_jogo}] Navegador dedicado configurado com sucesso.")
-        return driver
-        
-    except Exception as e:
-        erro_msg = f"❌ ERRO CRÍTICO NAS ETAPAS DE LOGIN/ABERTURA [{nome_jogo}]: {e}"
-        print(erro_msg)
-        print(f"[{nome_jogo}] Stacktrace: {traceback.format_exc()}")
+    tentativas = 0
+    max_tentativas = 3
+    
+    while tentativas < max_tentativas:
+        tentativas += 1
         try:
-            driver.save_screenshot(f"erro_login_{nome_jogo.replace(' ', '_')}.png")
-            print(f"📸 [{nome_jogo}] Screenshot de erro salvo.")
-        except: pass
-        return None
+            if tentativas > 1:
+                print(f"[{nome_jogo}] 🔄 Tentativa {tentativas}/{max_tentativas}...")
+                sleep(10)
+            
+            print(f"[{nome_jogo}] Acessando site principal...")
+            driver.get(URL_DO_SITE)
+            sleep(18)
+            
+            verificar_modais_bloqueio(driver)
+
+            print(f"[{nome_jogo}] Procurando botão Entrar (timeout 25s)...")
+            botao_entrar = WebDriverWait(driver, 25).until(
+                EC.presence_of_element_located((By.XPATH, "//button[contains(., 'Entrar')] | //a[contains(., 'Entrar')] | //*[text()='Entrar']"))
+            )
+            
+            driver.execute_script("arguments[0].click();", botao_entrar)
+            print(f"👉 [{nome_jogo}] Botão 'Entrar' clicado via JS.")
+            sleep(6)
+            
+            print(f"[{nome_jogo}] Preenchendo credenciais...")
+            input_email = WebDriverWait(driver, 15).until(
+                EC.visibility_of_element_located((By.XPATH, "//input[@id='email' or @name='email']"))
+            )
+            input_email.clear()
+            input_email.send_keys(EMAIL)
+            
+            input_pass = driver.find_element(By.XPATH, "//input[@id='password' or @name='password']")
+            input_pass.clear()
+            input_pass.send_keys(PASSWORD)
+            
+            botao_submit = driver.find_element(By.XPATH, "//button[@type='submit']")
+            driver.execute_script("arguments[0].click();", botao_submit)
+            
+            print(f"✅ [{nome_jogo}] Formulário de login enviado.")
+            sleep(18)
+            
+            print(f"[{nome_jogo}] Acessando jogo: {url_jogo}")
+            try:
+                driver.get(url_jogo)
+            except Exception as e:
+                if "ERR_CONNECTION_RESET" in str(e) or "ERR_CONNECTION_CLOSED" in str(e) or "ERR_HTTP2_PROTOCOL_ERROR" in str(e):
+                    print(f"[{nome_jogo}] ⚠️ Erro de conexão no jogo (429/protocolo), aguardando...")
+                    sleep(10)
+                    driver.get(url_jogo)
+                else:
+                    raise
+            
+            sleep(15)
+            
+            print(f"[{nome_jogo}] Verificando iframe do jogo...")
+            iframe_encontrado = False
+            for retry in range(5):
+                try:
+                    if driver.find_elements(By.XPATH, '//iframe[contains(@src, "spribe") or contains(@src, "aviator")]'):
+                        print(f"✅ [{nome_jogo}] Iframe encontrado.")
+                        iframe_encontrado = True
+                        break
+                except:
+                    pass
+                print(f"⏳ [{nome_jogo}] Aguardando iframe... (tentativa {retry+1}/5)")
+                sleep(4)
+            
+            if not iframe_encontrado:
+                print(f"⚠️ [{nome_jogo}] Iframe não encontrado após 5 tentativas, mas continuando...")
+            
+            driver.save_screenshot(f"{nome_jogo.replace(' ', '_')}_aberto.png")
+            print(f"📸 [{nome_jogo}] Screenshot salvo.")
+            
+            print(f"✅ [{nome_jogo}] Navegador dedicado configurado com sucesso.")
+            return driver
+            
+        except Exception as e:
+            erro_msg = f"[{nome_jogo}] ❌ ERRO TENTATIVA {tentativas}/{max_tentativas}: {e}"
+            print(erro_msg)
+            try:
+                driver.save_screenshot(f"erro_login_{nome_jogo.replace(' ', '_')}_t{tentativas}.png")
+                print(f"📸 [{nome_jogo}] Screenshot de erro salvo.")
+            except: pass
+            
+            if tentativas >= max_tentativas:
+                print(f"[{nome_jogo}] Stacktrace: {traceback.format_exc()}")
+                return None
+    
+    return None
 
 # =============================================================
 # 🎮 BUSCA DE ELEMENTOS
