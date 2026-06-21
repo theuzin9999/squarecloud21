@@ -1,7 +1,6 @@
 import os
 import sys
 import pytz
-import logging
 import threading
 import gc
 import requests
@@ -22,13 +21,13 @@ import firebase_admin
 from firebase_admin import credentials, db
 
 # =============================================================
-# ⚠️ CONTROLE GLOBAL DE THREADS E DRIVER
+# CONTROLE GLOBAL
 # =============================================================
 DRIVER_LOCK = threading.Lock() 
 STOP_EVENT = threading.Event() 
 
 # =============================================================
-# 🔥 CONFIGURAÇÃO FIREBASE
+# CONFIGURAÇÃO FIREBASE
 # =============================================================
 SERVICE_ACCOUNT_FILE = 'serviceAccountKey.json'
 DATABASE_URL = 'https://history-dashboard-a70ee-default-rtdb.firebaseio.com'
@@ -43,7 +42,7 @@ except Exception as e:
     sys.exit()
 
 # =============================================================
-# ⚙️ VARIÁVEIS OFICIAIS
+# VARIÁVEIS E FUNÇÕES AUXILIARES
 # =============================================================
 URL_DO_SITE = "https://go.goathbet.com/c/7vo"
 LINK_AVIATOR_ORIGINAL = "https://www.goathbet.bet/casino/spribe/aviator"
@@ -54,27 +53,9 @@ FIREBASE_PATH_2 = "aviator2"
 
 EMAIL = os.getenv("EMAIL")
 PASSWORD = os.getenv("PASSWORD")
-
 POLLING_INTERVAL = 1.0       
 TEMPO_MAX_INATIVIDADE = 360 
 TZ_BR = pytz.timezone("America/Sao_Paulo")
-
-# =============================================================
-# 🔧 FUNÇÕES AUXILIARES
-# =============================================================
-def run_diagnostics():
-    print("\n--- 🕵️ DIAGNÓSTICO DE CONEXÃO ---")
-    try:
-        ip = requests.get('https://api.ipify.org', timeout=10).text
-        print(f"🌐 IP Público: {ip}")
-    except Exception as e:
-        print(f"⚠️ Alerta de Rede: {e}")
-
-def limpar_pngs_antigos():
-    arquivos_png = glob.glob("*.png")
-    for f in arquivos_png:
-        try: os.remove(f)
-        except: pass
 
 def getColorClass(value):
     try:
@@ -87,92 +68,92 @@ def getColorClass(value):
 
 def enviar_firebase_async(path, data):
     def _send():
-        try:
-            db.reference(path).set(data)
+        try: db.reference(path).set(data)
         except: pass 
     threading.Thread(target=_send, daemon=True).start()
 
-def verificar_modais_bloqueio(driver):
-    try:
-        # Simplificado para evitar erros
-        btns = driver.find_elements(By.XPATH, "//button[contains(text(), 'ACEITAR') or contains(text(), 'Sim, sou')]")
-        for btn in btns:
-            driver.execute_script("arguments[0].click();", btn)
-    except: pass
-
-def stealth_script_inject(driver):
-    stealth_js = "Object.defineProperty(navigator, 'webdriver', {get: () => false});"
-    try:
-        driver.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument', {'source': stealth_js})
-    except: pass
-
 # =============================================================
-# 🚀 DRIVER E LOGIN
+# DRIVER (CORRIGIDO SEM VERSION_MAIN)
 # =============================================================
 def initialize_driver_instance():
     options = uc.ChromeOptions()
     options.add_argument("--headless=new")
     options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--window-size=1920,1080")
+    
     try:
+        # Removido version_main para detectar automaticamente a versão do servidor
         driver = uc.Chrome(options=options)
         stealth(driver, languages=["pt-BR", "pt"], vendor="Google Inc.", platform="Win32", fix_hairline=True)
         return driver
     except Exception as e:
-        print(f"⚠️ Erro no driver: {e}")
+        print(f"⚠️ Erro ao iniciar driver: {e}")
         return None
 
-def setup_tabs(driver):
-    stealth_script_inject(driver)
-    driver.get(URL_DO_SITE)
-    sleep(10)
-    # [Adicione aqui a lógica de preenchimento de login com try/except]
-    return {FIREBASE_PATH_ORIGINAL: driver.current_window_handle, FIREBASE_PATH_2: None}
+# =============================================================
+# LÓGICA DO BOT (INDENTAÇÃO CORRIGIDA)
+# =============================================================
+def find_game_elements_safe(driver):
+    try:
+        iframe = driver.find_element(By.XPATH, '//iframe[contains(@src, "spribe")]')
+        driver.switch_to.frame(iframe)
+        hist = driver.find_element(By.CSS_SELECTOR, "app-stats-widget, .payouts-block")
+        return iframe, hist
+    except: return None, None
 
-# =============================================================
-# 🔄 LOOP DE CAPTURA (CORRIGIDO)
-# =============================================================
 def start_bot(driver, game_handle, firebase_path):
     nome_log = "AVIATOR 1" if "history" in firebase_path else "AVIATOR 2"
     print(f"🚀 INICIADO: {nome_log}")
     
     LAST_SENT = None
     ULTIMO_MULTIPLIER_TIME = time()
-    estado_cookies = {'aceito': False}
-
-    # INDENTAÇÃO CORRIGIDA ABAIXO
+    
+    # O loop AGORA está dentro da função start_bot
     while not STOP_EVENT.is_set():
         raw_text = None
         with DRIVER_LOCK:
             try:
                 driver.switch_to.window(game_handle)
-                # Lógica de coleta aqui...
-                # Exemplo: raw_text = driver.find_element(...).text
-            except Exception as e:
-                print(f"Erro na thread {nome_log}: {e}")
+                driver.switch_to.default_content()
+                _, hist_element = find_game_elements_safe(driver)
+                if hist_element:
+                    raw_text = hist_element.find_element(By.CSS_SELECTOR, ".payout:first-child").text
+            except: pass
         
         if raw_text:
-            # Lógica de processamento e envio ao firebase
-            pass
-            
+            try:
+                novo_valor = float(raw_text.replace('x', ''))
+                if novo_valor != LAST_SENT:
+                    now = datetime.now(TZ_BR)
+                    payload = {"multiplier": f"{novo_valor:.2f}", "time": now.strftime("%H:%M:%S"), "color": getColorClass(novo_valor)}
+                    enviar_firebase_async(f"{firebase_path}/{now.strftime('%Y%m%d_%H%M%S')}", payload)
+                    LAST_SENT = novo_valor
+                    ULTIMO_MULTIPLIER_TIME = time()
+            except: pass
+        
         if (time() - ULTIMO_MULTIPLIER_TIME) > TEMPO_MAX_INATIVIDADE:
             STOP_EVENT.set()
         
         sleep(POLLING_INTERVAL)
 
 # =============================================================
-# 🚀 SUPERVISOR
+# SUPERVISOR
 # =============================================================
 def rodar_ciclo_monitoramento():
+    STOP_EVENT.clear()
     DRIVER = initialize_driver_instance()
     if not DRIVER: return
-    
+
     try:
-        handles = setup_tabs(DRIVER)
-        # Iniciar threads...
-        sleep(10)
+        # [Seu código de login aqui...]
+        t1 = threading.Thread(target=start_bot, args=(DRIVER, DRIVER.window_handles[0], FIREBASE_PATH_ORIGINAL), daemon=True)
+        t1.start()
+        
+        while not STOP_EVENT.is_set(): sleep(2)
     finally:
         DRIVER.quit()
+        gc.collect()
 
 if __name__ == "__main__":
     while True:
