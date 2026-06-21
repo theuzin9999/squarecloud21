@@ -272,6 +272,7 @@ def setup_tabs(driver):
             
         sleep(8) 
         handle_original = driver.current_window_handle
+        print(f"✅ Aba Aviator 1 configurada.")
         driver.save_screenshot("aviator1_inicial.png")
 
         print("🎯 Configurando Aviator 2 (VIP)...")
@@ -283,19 +284,7 @@ def setup_tabs(driver):
         driver.get(LINK_AVIATOR_2)
         sleep(6)
         
-        try:
-            card_aviator2 = WebDriverWait(driver, 8).until(
-                EC.element_to_be_clickable((By.XPATH, "//img[@alt='Aviator VIP']"))
-            )
-            card_aviator2.click()
-            print("👉 Aviator 2 acessado via clique no card.")
-        except Exception:
-            print("⚠️ Falha ao clicar no card do Aviator 2. Forçando navegação direta por link...")
-            driver.get(LINK_AVIATOR_2)
-            
-        sleep(8) 
-        driver.save_screenshot("aviator2_inicial.png")
-        
+        print(f"✅ Aba Aviator 2 configurada.")
         driver.switch_to.window(handle_original)
         return {FIREBASE_PATH_ORIGINAL: handle_original, FIREBASE_PATH_2: handle_aviator2}
         
@@ -333,6 +322,7 @@ def start_bot(driver, game_handle, firebase_path):
     
     estado_cookies = {'aceito': False}
 
+    print(f"🔄 [{nome_log}] Entrando no loop de captura...")
     while not STOP_EVENT.is_set():
         raw_text = None
         with DRIVER_LOCK:
@@ -340,6 +330,7 @@ def start_bot(driver, game_handle, firebase_path):
             try:
                 driver.switch_to.window(game_handle)
                 driver.switch_to.default_content()
+                print(f"🔄 [{nome_log}] Procurando iframe...")
                 iframe, hist_element = find_game_elements_safe(driver)
                 
                 if iframe:
