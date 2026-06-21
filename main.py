@@ -283,22 +283,36 @@ def setup_tabs(driver):
         handle_aviator2 = [h for h in handles if h != handle_original][0]
         
         driver.switch_to.window(handle_aviator2)
-        driver.get(LINK_AVIATOR_2)
-        sleep(12)
+        try:
+            driver.get(LINK_AVIATOR_2)
+        except Exception as e:
+            if "ERR_CONNECTION_RESET" in str(e) or "ERR_CONNECTION_CLOSED" in str(e) or "ERR_HTTP2_PROTOCOL_ERROR" in str(e):
+                print(f"⚠️ Erro de conexão ao abrir Aviator 2 (429/protocolo), aguardando...")
+                sleep(15)
+                try:
+                    driver.get(LINK_AVIATOR_2)
+                except Exception as e2:
+                    print(f"❌ Segunda tentativa de abrir Aviator 2 falhou: {e2}")
+            else:
+                raise
+        sleep(10)
         
-        # Retry: tenta localizar iframe várias vezes com F5 para passar do Vercel Security Checkpoint
         print(f"🔍 [DEBUG] URL Aviator 2: {driver.current_url} | Title: {driver.title}")
         for retry in range(5):
-            if driver.find_elements(By.XPATH, '//iframe[contains(@src, "spribe") or contains(@src, "aviator")]'):
-                break
-            print(f"⏳ Aguardando iframe Aviator 2... (tentativa {retry+1}/5) - dando F5...")
             try:
-                driver.refresh()
-            except:
-                driver.get(LINK_AVIATOR_2)
-            sleep(5)
+                if driver.find_elements(By.XPATH, '//iframe[contains(@src, "spribe") or contains(@src, "aviator")]'):
+                    print("✅ [Aviator 2] Iframe encontrado.")
+                    break
+                print(f"⏳ Aguardando iframe Aviator 2... (tentativa {retry+1}/5)")
+                try:
+                    driver.get(LINK_AVIATOR_2)
+                except:
+                    pass
+                sleep(6)
+            except Exception as e:
+                print(f"⚠️ Erro ao buscar iframe (tentativa {retry+1}): {e}")
+                sleep(6)
         
-        print(f"✅ Aba Aviator 2 configurada.")
         driver.save_screenshot("aviator2_inicial.png")
         print("📸 Screenshot Aviator 2 salvo.")
         
