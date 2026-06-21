@@ -11,13 +11,11 @@ import glob
 from time import sleep, time
 from datetime import datetime
 
-# 🔥 SELENIUM PADRÃO E CONFIGURAÇÕES DE SERVIÇO
+# 🔥 SELENIUM PADRÃO (SEM WEBDRIVER-MANAGER)
 from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
-from webdriver_manager.chrome import ChromeDriverManager
 
 # 🛡️ BIBLIOTECA DE OCULTAÇÃO DE AUTOMAÇÃO
 from selenium_stealth import stealth
@@ -143,7 +141,7 @@ def stealth_script_inject(driver):
         print(f"Aviso ao injetar stealth script: {e}")
 
 # =============================================================
-# 🚀 DRIVER COM SELENIUM PADRÃO + ANTIBOT FLAGS
+# 🚀 DRIVER COM NATIVE SELENIUM MANAGER + APONTAMENTO CHROMIUM
 # =============================================================
 def initialize_driver_instance():
     try:
@@ -157,7 +155,10 @@ def initialize_driver_instance():
     options = webdriver.ChromeOptions()
     options.page_load_strategy = 'eager'
     
-    # Flags de performance e Headless estável para Linux/Square Cloud
+    # 🔥 CRÍTICO: Aponta diretamente para o executável do servidor (v148)
+    if os.name != 'nt':
+        options.binary_location = "/usr/bin/chromium"
+    
     options.add_argument("--headless=new")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
@@ -165,18 +166,15 @@ def initialize_driver_instance():
     options.add_argument("--disable-popup-blocking")
     options.add_argument("--window-size=1920,1080")
     
-    # Forçar User-Agent real e remover traços de automação nativamente
     options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
     options.add_argument("--disable-blink-features=AutomationControlled")
     options.add_experimental_option("excludeSwitches", ["enable-automation"])
     options.add_experimental_option('useAutomationExtension', False)
 
     try:
-        # Gerencia e instala automaticamente a versão correta do Chromedriver
-        service = Service(ChromeDriverManager().install())
-        driver = webdriver.Chrome(service=service, options=options)
+        # Deixamos o Selenium 4 gerenciar nativamente o driver compatível com a v148
+        driver = webdriver.Chrome(options=options)
         
-        # Aplica a camuflagem stealth por cima do driver padrão
         stealth(driver,
             languages=["pt-BR", "pt"],
             vendor="Google Inc.",
@@ -244,7 +242,6 @@ def setup_tabs(driver):
         sleep(12) 
         handle_original = driver.current_window_handle
 
-        # [COOKIES APÓS LOGIN - AVIATOR 1]
         try:
             if driver.find_elements(By.XPATH, '//iframe[contains(@src, "spribe") or contains(@src, "aviator")]'):
                 iframe = driver.find_element(By.XPATH, '//iframe[contains(@src, "spribe") or contains(@src, "aviator")]')
@@ -258,7 +255,6 @@ def setup_tabs(driver):
                 driver.switch_to.default_content()
         except: pass
 
-        # [📸 PRINT SELEÇÃO AVIATOR 1]
         try:
             driver.save_screenshot("aviator1_aberto.png")
             print("📸 [Print] Imagem 'aviator1_aberto.png' salva com sucesso.")
@@ -271,7 +267,7 @@ def setup_tabs(driver):
         driver.execute_script("window.open('');")
         sleep(2)
         handles = driver.window_handles
-        handle_aviator2 = handles[-1] # Garante foco na aba recém-criada
+        handle_aviator2 = handles[-1]
         
         driver.switch_to.window(handle_aviator2)
         driver.get(LINK_AVIATOR_2)
@@ -283,7 +279,6 @@ def setup_tabs(driver):
             print(f"⏳ Aguardando iframe Aviator 2... (tentativa {retry+1}/3)")
             sleep(5)
             
-        # [COOKIES APÓS LOGIN - AVIATOR 2]
         try:
             if driver.find_elements(By.XPATH, '//iframe[contains(@src, "spribe") or contains(@src, "aviator")]'):
                 iframe = driver.find_element(By.XPATH, '//iframe[contains(@src, "spribe") or contains(@src, "aviator")]')
@@ -297,7 +292,6 @@ def setup_tabs(driver):
                 driver.switch_to.default_content()
         except: pass
 
-        # [📸 PRINT SELEÇÃO AVIATOR 2]
         try:
             driver.save_screenshot("aviator2_aberto.png")
             print("📸 [Print] Imagem 'aviator2_aberto.png' salva com sucesso.")
