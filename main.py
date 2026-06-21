@@ -9,7 +9,7 @@ import subprocess
 import traceback
 import glob
 from time import sleep, time
-from datetime import datetime
+from datetime import datetime, timezone
 
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
@@ -59,6 +59,8 @@ PASSWORD = os.getenv("PASSWORD")
 POLLING_INTERVAL = 1.0       
 TEMPO_MAX_INATIVIDADE = 360 
 TZ_BR = pytz.timezone("America/Sao_Paulo")
+HORA_REINICIO = 23
+MINUTO_REINICIO = 59
 
 # =============================================================
 # 🔧 FUNÇÕES AUXILIARES E TRATAMENTO DE MODAIS
@@ -217,6 +219,271 @@ def initialize_driver_instance():
         print(f"⚠️ Erro ao instalar/iniciar driver: {e}")
         return None
 
+def setup_tabs(driver):
+    stealth_script_inject(driver)
+    
+    print("➡️ Acessando site e configurando abas com Anti-Detecção UC...")
+    try:
+        driver.get(URL_DO_SITE)
+        sleep(12) 
+        
+        verificar_modais_bloqueio(driver)
+
+        botao_entrar = WebDriverWait(driver, 15).until(
+            EC.presence_of_element_located((By.XPATH, "//button[contains(., 'Entrar')] | //a[contains(., 'Entrar')] | //*[text()='Entrar']"))
+        )
+        
+        driver.execute_script("arguments[0].click();", botao_entrar)
+        print("👉 Botão 'Entrar' clicado via JS com sucesso.")
+        sleep(4)
+        
+        input_email = WebDriverWait(driver, 10).until(
+            EC.visibility_of_element_located((By.XPATH, "//input[@id='email' or @name='email']"))
+        )
+        input_email.send_keys(EMAIL)
+        
+        input_pass = driver.find_element(By.XPATH, "//input[@id='password' or @name='password']")
+        input_pass.send_keys(PASSWORD)
+        
+        botao_submit = driver.find_element(By.XPATH, "//button[@type='submit']")
+        driver.execute_script("arguments[0].click();", botao_submit)
+        
+        print("✅ Formulário de login enviado.")
+        sleep(12) 
+    except Exception as e:
+        print(f"❌ ERRO CRÍTICO NAS ETAPAS DE LOGIN: {e}")
+        try:
+            driver.save_screenshot("erro_login.png")
+        except: pass
+        return None
+
+    # =============================================================
+    # 🔄 DIRECIONAMENTO ABAS DOS JOGOS
+    # =============================================================
+    try:
+        print("🎯 Configurando Aviator 1...")
+        try:
+            card_aviator1 = WebDriverWait(driver, 8).until(
+                EC.element_to_be_clickable((By.XPATH, "//img[@alt='Aviator']"))
+            )
+            card_aviator1.click()
+        except Exception:
+            print("⚠️ Falha ao clicar no card. Navegando diretamente...")
+            driver.get(LINK_AVIATOR_ORIGINAL)
+            
+        sleep(10) 
+        handle_original = driver.current_window_handle
+        print(f"✅ Aba Aviator 1 configurada.")
+        driver.save_screenshot("aviator1_inicial.png")
+
+        print("🎯 Configurando Aviator 2 (VIP)...")
+        driver.execute_script("window.open('');")
+        handles = driver.window_handles
+        handle_aviator2 = [h for h in handles if h != handle_original][0]
+        
+        driver.switch_to.window(handle_aviator2)
+        driver.get(LINK_AVIATOR_2)
+        sleep(12)
+        
+        # Retry: tenta localizar iframe várias vezes
+        print(f"🔍 [DEBUG] URL Aviator 2: {driver.current_url}")
+        for retry in range(3):
+            if driver.find_elements(By.XPATH, '//iframe[contains(@src, "spribe") or contains(@src, "aviator")]'):
+                break
+            print(f"⏳ Aguardando iframe Aviator 2... (tentativa {retry+1}/3)")
+            sleep(5)
+        
+        print(f"✅ Aba Aviator 2 configurada.")
+        driver.save_screenshot("aviator2_inicial.png")
+        print("📸 Screenshot Aviator 2 salvo.")
+        
+        driver.switch_to.window(handle_original)
+        return {FIREBASE_PATH_ORIGINAL: handle_original, FIREBASE_PATH_2: handle_aviator2}
+        
+    except Exception as e:
+        print(f"⚠️ Falha fatal ao estruturar as páginas internas do jogo: {e}")
+        return None
+
+# =============================================================
+# 🎮 BUSCA DE ELEMENTOS
+# =============================================================
+def find_game_elements_safe(driver):
+    try:
+        driver.implicitly_wait(2)
+        iframe = driver.find_element(By.XPATH, '//iframe[contains(@src, "spribe") or contains(@src, "aviator")]')
+        driver.switch_to.frame(iframe)
+        hist = driver.find_element(By.CSS_SELECTOR, ".payouts-block, app-stats-widget")
+        driver.implicitly_wait(10)
+        return iframe, hist
+    except Exception as e:
+        driver.implicitly_wait(10)
+        return None, None
+
+# =============================================================
+# 🔄 LOOP DE CAPTURA COM SUPORTE ANTIBLOCK COOKIES
+# =============================================================
+def start_bot(driver, game_handle, firebase_path):
+    nome_log = "AVIATOR 1" if "history" in firebase_path else "AVIATOR 2"
+    print(f"🚀 [{nome_log}] Monitorando '{firebase_path}'...")
+    
+    LAST_SENT = None
+    ULTIMO_MULTIPLIER_TIME = time()
+    data_atual = datetime.now(TZ_BR).date()
+    contador_debug = 0
+
+    while not STOP_EVENT.is_set():
+        now_br = datetime.now(TZ_BR)
+        if now_br.hour == 0 and now_br.minute <= 5 and now_br.date() != data_atual:
+            print(f"🌙 [{nome_log}] Reinício diário (00:00)...")
+            return
+        
+        # Reinício diário às 23:59
+        if now_br.hour == HORA_REINICIO and now_br.minute >= MINUTO_REINICIO:
+            print(f"🌙 [{nome_log}] Reinício diário ({HORA_REINICIO}:{MINUTO_REINICIO:02d})...")
+            return
+        
+        raw_text = None
+        with DRIVER_LOCK:
+            if STOP_EVENT.is_set(): break
+            try:
+                driver.switch_to.window(game_handle)
+                driver.switch_to.default_content()
+                
+                # Debug apenas para Aviator 2
+                if nome_log == "AVIATOR 2" and contador_debug % 10 == 0:
+                    print(f"🔍 [DEBUG AVIATOR 2] URL: {driver.current_url} | Title: {driver.title}")
+                contador_debug += 1
+                
+                iframe, hist_element = find_game_elements_safe(driver)
+                
+                if nome_log == "AVIATOR 2" and not iframe:
+                    print(f"⚠️ [{nome_log}] Iframe NÃO encontrado na página.")
+                
+                if iframe:
+                    checar_e_aceitar_cookies_iframe(driver, {'aceito': False})
+                
+                if nome_log == "AVIATOR 2" and not hist_element:
+                    print(f"⚠️ [{nome_log}] Elemento histórico NÃO encontrado dentro do iframe.")
+                
+                if hist_element:
+                    try:
+                        first_payout = hist_element.find_element(
+                            By.CSS_SELECTOR, ".payout:first-child, .bubble-multiplier:first-child"
+                        )
+                        raw_text = first_payout.get_attribute("innerText")
+                        if nome_log == "AVIATOR 2" and not raw_text and contador_debug % 30 == 0:
+                            print(f"⚠️ [{nome_log}] first_payout encontrado mas innerText vazio.")
+                    except Exception as e:
+                        if nome_log == "AVIATOR 2" and contador_debug % 30 == 0:
+                            print(f"⚠️ [{nome_log}] Erro ao buscar first_payout: {e}")
+            except Exception as e:
+                if nome_log == "AVIATOR 2" and contador_debug % 30 == 0:
+                    print(f"⚠️ [{nome_log}] Exceção no loop: {e}")
+                pass
+        
+        if raw_text:
+            clean_text = raw_text.strip().lower().replace('x', '').replace('\n', '').strip()
+            if clean_text:
+                try:
+                    novo_valor = float(clean_text)
+                    if novo_valor != LAST_SENT:
+                        payload = {
+                            "multiplier": f"{novo_valor:.2f}",
+                            "time": now_br.strftime("%H:%M:%S"),
+                            "color": getColorClass(novo_valor),
+                            "date": now_br.strftime("%Y-%m-%d")
+                        }
+                        key = now_br.strftime("%Y-%m-%d_%H-%M-%S-%f").replace('.', '-')
+                        enviar_firebase_async(f"{firebase_path}/{key}", payload)
+                        print(f"🔥 [{nome_log}] {payload['multiplier']}x")
+                        LAST_SENT = novo_valor
+                        ULTIMO_MULTIPLIER_TIME = time()
+                except: pass
+
+        if (time() - ULTIMO_MULTIPLIER_TIME) > TEMPO_MAX_INATIVIDADE:
+            print(f"⚠️ [{nome_log}] Sem dados por {TEMPO_MAX_INATIVIDADE}s. Reiniciando...")
+            STOP_EVENT.set()
+            return
+            
+        sleep(POLLING_INTERVAL + 0.5)
+
+# =============================================================
+# 🚀 SUPERVISOR (MAIN LOOP)
+# =============================================================
+def rodar_ciclo_monitoramento():
+    DRIVER = None
+    STOP_EVENT.clear() 
+    
+    limpar_pngs_antigos()
+    
+    try:
+        print("\n🔵 INICIANDO NOVO CICLO COM UNDETECTED-CHROMEDRIVER...")
+        DRIVER = initialize_driver_instance()
+        
+        if not DRIVER:
+            print("⚠️ Falha ao instanciar o driver. Aguardando para nova tentativa...")
+            sleep(10)
+            return
+
+        handles = setup_tabs(DRIVER)
+        
+        if not handles:
+            print("⚠️ Ciclo interrompido por falha de autenticação. Reiniciando driver...")
+            return
+
+        handle_original = handles[FIREBASE_PATH_ORIGINAL]
+        handle_aviator2 = handles[FIREBASE_PATH_2]
+
+        print("⏳ Monitoramento iniciado (Threads)...")
+        
+        t1 = threading.Thread(target=start_bot, args=(DRIVER, handle_original, FIREBASE_PATH_ORIGINAL), daemon=True)
+        t2 = threading.Thread(target=start_bot, args=(DRIVER, handle_aviator2, FIREBASE_PATH_2), daemon=True)
+
+        t1.start()
+        t2.start()
+
+        while t1.is_alive() or t2.is_alive():
+            if STOP_EVENT.is_set():
+                break
+            sleep(2)
+            
+        print("🛑 Ciclo encerrado. Limpando recursos...")
+        
+    except Exception as e:
+        print(f"\n❌ ERRO NO CICLO: {e}")
+        traceback.print_exc()
+    finally:
+        STOP_EVENT.set() 
+        if DRIVER:
+            try:
+                DRIVER.quit()
+                print("🗑️ Driver encerrado com sucesso.")
+            except: pass
+        gc.collect()
+        sleep(5) 
+
+if __name__ == "__main__":
+    run_diagnostics()
+    
+    if not EMAIL or not PASSWORD:
+        print("❗ Configure EMAIL e PASSWORD nas variáveis de ambiente.")
+        sys.exit()
+    
+    print("==============================================")
+    print("     SUPERVISOR DE BOT INICIADO (24H)        ")
+    print("==============================================")
+
+    while True:
+        try:
+            rodar_ciclo_monitoramento()
+            print("♻️ Reiniciando processo em 5 segundos...\n")
+            sleep(5)
+        except KeyboardInterrupt:
+            print("\n🚫 Parada manual pelo usuário.")
+            break
+        except Exception as e:
+            print(f"❌ Erro crítico no Supervisor: {e}")
+            sleep(10)
 def setup_tabs(driver):
     stealth_script_inject(driver)
     
