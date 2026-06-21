@@ -1,6 +1,7 @@
 import os
 import sys
 import pytz
+import logging
 import threading
 import gc
 import requests
@@ -27,7 +28,7 @@ DRIVER_LOCK = threading.Lock()
 STOP_EVENT = threading.Event() 
 
 # =============================================================
-# CONFIGURAÇÃO FIREBASE
+# FIREBASE
 # =============================================================
 SERVICE_ACCOUNT_FILE = 'serviceAccountKey.json'
 DATABASE_URL = 'https://history-dashboard-a70ee-default-rtdb.firebaseio.com'
@@ -47,7 +48,6 @@ except Exception as e:
 URL_DO_SITE = "https://go.goathbet.com/c/7vo"
 LINK_AVIATOR_ORIGINAL = "https://www.goathbet.bet/casino/spribe/aviator"
 LINK_AVIATOR_2 = "https://www.goathbet.bet/casino/spribe/aviator-vip"
-
 FIREBASE_PATH_ORIGINAL = "history"
 FIREBASE_PATH_2 = "aviator2"
 
@@ -72,9 +72,6 @@ def enviar_firebase_async(path, data):
         except: pass 
     threading.Thread(target=_send, daemon=True).start()
 
-# =============================================================
-# DRIVER (CORRIGIDO SEM VERSION_MAIN)
-# =============================================================
 def initialize_driver_instance():
     options = uc.ChromeOptions()
     options.add_argument("--headless=new")
@@ -83,7 +80,7 @@ def initialize_driver_instance():
     options.add_argument("--window-size=1920,1080")
     
     try:
-        # Removido version_main para detectar automaticamente a versão do servidor
+        # CORREÇÃO: Removido version_main para evitar erro de compatibilidade
         driver = uc.Chrome(options=options)
         stealth(driver, languages=["pt-BR", "pt"], vendor="Google Inc.", platform="Win32", fix_hairline=True)
         return driver
@@ -92,43 +89,38 @@ def initialize_driver_instance():
         return None
 
 # =============================================================
-# LÓGICA DO BOT (INDENTAÇÃO CORRIGIDA)
+# LOOP DE CAPTURA (CORRIGIDO)
 # =============================================================
-def find_game_elements_safe(driver):
-    try:
-        iframe = driver.find_element(By.XPATH, '//iframe[contains(@src, "spribe")]')
-        driver.switch_to.frame(iframe)
-        hist = driver.find_element(By.CSS_SELECTOR, "app-stats-widget, .payouts-block")
-        return iframe, hist
-    except: return None, None
-
 def start_bot(driver, game_handle, firebase_path):
     nome_log = "AVIATOR 1" if "history" in firebase_path else "AVIATOR 2"
     print(f"🚀 INICIADO: {nome_log}")
     
     LAST_SENT = None
     ULTIMO_MULTIPLIER_TIME = time()
-    
-    # O loop AGORA está dentro da função start_bot
+    estado_cookies = {'aceito': False}
+
+    # INDENTAÇÃO CORRIGIDA: Este loop agora pertence à função
     while not STOP_EVENT.is_set():
         raw_text = None
         with DRIVER_LOCK:
             try:
                 driver.switch_to.window(game_handle)
-                driver.switch_to.default_content()
-                _, hist_element = find_game_elements_safe(driver)
-                if hist_element:
-                    raw_text = hist_element.find_element(By.CSS_SELECTOR, ".payout:first-child").text
-            except: pass
+                # Lógica simplificada de coleta
+                iframe = driver.find_element(By.XPATH, '//iframe[contains(@src, "spribe")]')
+                driver.switch_to.frame(iframe)
+                hist = driver.find_element(By.CSS_SELECTOR, ".payout:first-child")
+                raw_text = hist.text
+            except Exception:
+                pass
         
         if raw_text:
             try:
-                novo_valor = float(raw_text.replace('x', ''))
-                if novo_valor != LAST_SENT:
+                valor = float(raw_text.replace('x', ''))
+                if valor != LAST_SENT:
                     now = datetime.now(TZ_BR)
-                    payload = {"multiplier": f"{novo_valor:.2f}", "time": now.strftime("%H:%M:%S"), "color": getColorClass(novo_valor)}
-                    enviar_firebase_async(f"{firebase_path}/{now.strftime('%Y%m%d_%H%M%S')}", payload)
-                    LAST_SENT = novo_valor
+                    enviar_firebase_async(f"{firebase_path}/{now.strftime('%Y%m%d_%H%M%S')}", 
+                                         {"multiplier": f"{valor:.2f}", "time": now.strftime("%H:%M:%S")})
+                    LAST_SENT = valor
                     ULTIMO_MULTIPLIER_TIME = time()
             except: pass
         
@@ -138,7 +130,7 @@ def start_bot(driver, game_handle, firebase_path):
         sleep(POLLING_INTERVAL)
 
 # =============================================================
-# SUPERVISOR
+# SUPERVISOR E INICIALIZAÇÃO
 # =============================================================
 def rodar_ciclo_monitoramento():
     STOP_EVENT.clear()
@@ -146,11 +138,11 @@ def rodar_ciclo_monitoramento():
     if not DRIVER: return
 
     try:
-        # [Seu código de login aqui...]
-        t1 = threading.Thread(target=start_bot, args=(DRIVER, DRIVER.window_handles[0], FIREBASE_PATH_ORIGINAL), daemon=True)
+        # (Aqui entraria sua lógica de login)
+        t1 = threading.Thread(target=start_bot, args=(DRIVER, DRIVER.window_handles[0], FIREBASE_PATH_ORIGINAL))
         t1.start()
         
-        while not STOP_EVENT.is_set(): sleep(2)
+        while not STOP_EVENT.is_set(): sleep(5)
     finally:
         DRIVER.quit()
         gc.collect()
