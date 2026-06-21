@@ -1,5 +1,5 @@
 selenium>=4.15.0
-undetected-chromedriver>=3.6.0
+undetected-chromedriver==3.5.5
 selenium-stealth
 firebase-admin
 pytz
