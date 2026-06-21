@@ -27,6 +27,7 @@ from firebase_admin import credentials, db
 # =============================================================
 DRIVER_LOCK = threading.Lock() 
 STOP_EVENT = threading.Event() 
+ESTADO_COOKIES_IFRAME = {}  # Mantém estado por nome do jogo (AVIATOR 1 / AVIATOR 2)
 
 # =============================================================
 # 🔥 CONFIGURAÇÃO FIREBASE
@@ -285,12 +286,16 @@ def setup_tabs(driver):
         driver.get(LINK_AVIATOR_2)
         sleep(12)
         
-        # Retry: tenta localizar iframe várias vezes
-        print(f"🔍 [DEBUG] URL Aviator 2: {driver.current_url}")
-        for retry in range(3):
+        # Retry: tenta localizar iframe várias vezes com F5 para passar do Vercel Security Checkpoint
+        print(f"🔍 [DEBUG] URL Aviator 2: {driver.current_url} | Title: {driver.title}")
+        for retry in range(5):
             if driver.find_elements(By.XPATH, '//iframe[contains(@src, "spribe") or contains(@src, "aviator")]'):
                 break
-            print(f"⏳ Aguardando iframe Aviator 2... (tentativa {retry+1}/3)")
+            print(f"⏳ Aguardando iframe Aviator 2... (tentativa {retry+1}/5) - dando F5...")
+            try:
+                driver.refresh()
+            except:
+                driver.get(LINK_AVIATOR_2)
             sleep(5)
         
         print(f"✅ Aba Aviator 2 configurada.")
@@ -360,7 +365,7 @@ def start_bot(driver, game_handle, firebase_path):
                     print(f"⚠️ [{nome_log}] Iframe NÃO encontrado na página.")
                 
                 if iframe:
-                    checar_e_aceitar_cookies_iframe(driver, {'aceito': False})
+                    checar_e_aceitar_cookies_iframe(driver, ESTADO_COOKIES_IFRAME.setdefault(nome_log, {'aceito': False}))
                 
                 if nome_log == "AVIATOR 2" and not hist_element:
                     print(f"⚠️ [{nome_log}] Elemento histórico NÃO encontrado dentro do iframe.")
