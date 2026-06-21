@@ -46,7 +46,6 @@ except Exception as e:
 # =============================================================
 # ⚙️ VARIÁVEIS OFICIAIS GOATHBET
 # =============================================================
-# Atualizado para o domínio .bet conforme link fornecido
 URL_DO_SITE = "https://www.goathbet.bet"
 LINK_AVIATOR_ORIGINAL = "https://www.goathbet.bet/pt/casino/spribe/aviator"
 LINK_AVIATOR_2 = "https://www.goathbet.bet/casino/spribe/aviator-vip"
@@ -67,10 +66,9 @@ TZ_BR = pytz.timezone("America/Sao_Paulo")
 def run_diagnostics():
     print("\n--- 🕵️ DIAGNÓSTICO DE CONEXÃO ---")
     try:
+        # Apenas pega o IP para evitar gerar bloco 429 no site alvo via requests puro
         ip = requests.get('https://api.ipify.org', timeout=10).text
-        print(f"🌐 IP Público: {ip}")
-        res = requests.get(URL_DO_SITE, timeout=10, headers={'User-Agent': 'Mozilla/5.0'})
-        print(f"📡 Status Site (Requests normal): {res.status_code}")
+        print(f"🌐 IP Público da Hospedagem: {ip}")
     except Exception as e:
         print(f"⚠️ Alerta de Rede: {e}")
     print("----------------------------------\n")
@@ -128,35 +126,6 @@ def verificar_modais_bloqueio(driver):
         sleep(1)
         print("✅ Modal 'Novo Cadastro' ocultado.")
     except: pass
-
-def checar_e_aceitar_cookies_iframe(driver, estado_cookies):
-    if estado_cookies.get('aceito', False):
-        return
-
-    try:
-        btn_cookies_interno = None
-        xpaths_tentativas = [
-            "//button[contains(text(), 'ACEITAR TODOS') or contains(., 'ACEITAR TODOS')]",
-            "//button[contains(@class, 'success') or contains(@class, 'green')]",
-            "//button[./span[contains(text(), 'ACEITAR TODOS')]]"
-        ]
-        
-        for xpath in xpaths_tentativas:
-            try:
-                elemento = driver.find_element(By.XPATH, xpath)
-                if elemento.is_displayed() and elemento.size['width'] > 0:
-                    btn_cookies_interno = elemento
-                    break
-            except:
-                continue
-
-        if btn_cookies_interno:
-            driver.execute_script("arguments[0].click();", btn_cookies_interno)
-            print("🛡️ [Iframe] Banner de cookies interno limpo com sucesso!")
-            estado_cookies['aceito'] = True
-            sleep(2)
-    except:
-        pass
 
 def stealth_script_inject(driver):
     stealth_js = """
@@ -244,13 +213,12 @@ def setup_tabs(driver):
         sleep(12) 
     except Exception as e:
         print(f"❌ ERRO CRÍTICO NAS ETAPAS DE LOGIN: {e}")
-        try:
-            driver.save_screenshot("erro_login.png")
+        try: driver.save_screenshot("erro_login.png")
         except: pass
         return None
 
     # =============================================================
-    # 🔄 DIRECIONAMENTO ABAS DOS JOGOS
+    # 🔄 DIRECIONAMENTO E LIMPEZA DE COOKIES NAS ABAS DOS JOGOS
     # =============================================================
     try:
         print("🎯 Configurando Aviator 1 (Aba Principal)...")
@@ -263,8 +231,30 @@ def setup_tabs(driver):
             print("⚠️ Falha ao clicar no card. Navegando diretamente...")
             driver.get(LINK_AVIATOR_ORIGINAL)
             
-        sleep(10) 
+        sleep(12) 
         handle_original = driver.current_window_handle
+
+        # [COOKIES APÓS LOGIN - AVIATOR 1]
+        try:
+            if driver.find_elements(By.XPATH, '//iframe[contains(@src, "spribe") or contains(@src, "aviator")]'):
+                iframe = driver.find_element(By.XPATH, '//iframe[contains(@src, "spribe") or contains(@src, "aviator")]')
+                driver.switch_to.frame(iframe)
+                for xpath in ["//button[contains(text(), 'ACEITAR TODOS')]", "//button[contains(., 'ACEITAR TODOS')]", "//button[contains(@class, 'success')]"]:
+                    try:
+                        driver.find_element(By.XPATH, xpath).click()
+                        print("🛡️ [Aviator 1] Banner de cookies limpo com sucesso após login!")
+                        break
+                    except: pass
+                driver.switch_to.default_content()
+        except: pass
+
+        # [📸 PRINT SELEÇÃO AVIATOR 1]
+        try:
+            driver.save_screenshot("aviator1_aberto.png")
+            print("📸 [Print] Imagem 'aviator1_aberto.png' salva com sucesso.")
+        except Exception as e:
+            print(f"⚠️ Falha ao gerar print do Aviator 1: {e}")
+
         print(f"✅ Aba Aviator 1 configurada.")
 
         print("🎯 Configurando Aviator 2 VIP (Nova Aba)...")
@@ -281,6 +271,27 @@ def setup_tabs(driver):
                 break
             print(f"⏳ Aguardando iframe Aviator 2... (tentativa {retry+1}/3)")
             sleep(5)
+            
+        # [COOKIES APÓS LOGIN - AVIATOR 2]
+        try:
+            if driver.find_elements(By.XPATH, '//iframe[contains(@src, "spribe") or contains(@src, "aviator")]'):
+                iframe = driver.find_element(By.XPATH, '//iframe[contains(@src, "spribe") or contains(@src, "aviator")]')
+                driver.switch_to.frame(iframe)
+                for xpath in ["//button[contains(text(), 'ACEITAR TODOS')]", "//button[contains(., 'ACEITAR TODOS')]", "//button[contains(@class, 'success')]"]:
+                    try:
+                        driver.find_element(By.XPATH, xpath).click()
+                        print("🛡️ [Aviator 2] Banner de cookies limpo com sucesso após login!")
+                        break
+                    except: pass
+                driver.switch_to.default_content()
+        except: pass
+
+        # [📸 PRINT SELEÇÃO AVIATOR 2]
+        try:
+            driver.save_screenshot("aviator2_aberto.png")
+            print("📸 [Print] Imagem 'aviator2_aberto.png' salva com sucesso.")
+        except Exception as e:
+            print(f"⚠️ Falha ao gerar print do Aviator 2: {e}")
         
         print(f"✅ Aba Aviator 2 configurada.")
         driver.switch_to.window(handle_original)
@@ -306,7 +317,7 @@ def find_game_elements_safe(driver):
         return None, None
 
 # =============================================================
-# 🔄 LOOP DE CAPTURA COM SUPORTE ANTIBLOCK COOKIES
+# 🔄 LOOP DE CAPTURA LIMPO (SEM FLOOD DE COOKIES)
 # =============================================================
 def start_bot(driver, game_handle, firebase_path):
     nome_log = "AVIATOR 1" if "history" in firebase_path else "AVIATOR 2"
@@ -318,7 +329,6 @@ def start_bot(driver, game_handle, firebase_path):
     while not STOP_EVENT.is_set():
         now_br = datetime.now(TZ_BR)
         
-        # 🔥 Atualização: Reinício cravado às 23:59 todos os dias
         if now_br.hour == 23 and now_br.minute == 59:
             print(f"🌙 [{nome_log}] Reinício diário agendado (23:59)...")
             STOP_EVENT.set()
@@ -331,9 +341,6 @@ def start_bot(driver, game_handle, firebase_path):
                 driver.switch_to.window(game_handle)
                 driver.switch_to.default_content()
                 iframe, hist_element = find_game_elements_safe(driver)
-                
-                if iframe:
-                    checar_e_aceitar_cookies_iframe(driver, {'aceito': False})
                 
                 if hist_element:
                     first_payout = hist_element.find_element(
@@ -356,7 +363,6 @@ def start_bot(driver, game_handle, firebase_path):
                             "date": now_br.strftime("%Y-%m-%d")
                         }
                         
-                        # Formato exato do Firebase: 2025-12-02_22-40-35-960956
                         key = now_br.strftime("%Y-%m-%d_%H-%M-%S-%f")
                         enviar_firebase_async(f"{firebase_path}/{key}", payload)
                         LAST_SENT = novo_valor
@@ -391,7 +397,7 @@ def rodar_ciclo_monitoramento():
         handles = setup_tabs(DRIVER)
         
         if not handles:
-            print("⚠️ Ciclo interrompido por falha de autenticação. Reiniciando driver...")
+            print("⚠️ Ciclo interrompido por falhas de carregamento. Reiniciando driver...")
             return
 
         handle_original = handles[FIREBASE_PATH_ORIGINAL]
