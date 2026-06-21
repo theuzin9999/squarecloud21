@@ -1,5 +1,4 @@
 selenium>=4.15.0
-webdriver-manager
 selenium-stealth
 firebase-admin
 pytz
