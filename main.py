@@ -11,7 +11,7 @@ import glob
 from time import sleep, time
 from datetime import datetime
 
-# 🔥 SELENIUM PADRÃO (SEM WEBDRIVER-MANAGER)
+# 🔥 SELENIUM PADRÃO (SEM WEBDRIVER-MANAGER OU UC)
 from selenium import webdriver
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
@@ -67,10 +67,18 @@ TZ_BR = pytz.timezone("America/Sao_Paulo")
 def run_diagnostics():
     print("\n--- 🕵️ DIAGNÓSTICO DE CONEXÃO ---")
     try:
+        # Obtém o IP público da hospedagem
         ip = requests.get('https://api.ipify.org', timeout=10).text
         print(f"🌐 IP Público da Hospedagem: {ip}")
+        
+        # Simula um navegador real para monitorar o status com segurança
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+        }
+        status = requests.get(URL_DO_SITE, headers=headers, timeout=10).status_code
+        print(f"📡 Status Site (Requests camuflado): {status}")
     except Exception as e:
-        print(f"⚠️ Alerta de Rede: {e}")
+        print(f"⚠️ Alerta de Rede/Status: {e}")
     print("----------------------------------\n")
 
 def limpar_pngs_antigos():
@@ -107,7 +115,7 @@ def enviar_firebase_async(path, data):
 
 def verificar_modais_bloqueio(driver):
     try:
-        btn_cookies = driver.find_element(By.XPATH, "//button[contains(text(), 'ACEITAR TODOS') or contains(., 'ACEITAR TODOS')]")
+        btn_cookies = driver.find_element(By.開PATH, "//button[contains(text(), 'ACEITAR TODOS') or contains(., 'ACEITAR TODOS')]")
         driver.execute_script("arguments[0].click();", btn_cookies)
         print("✅ Banner de Cookies geral aceito.")
         sleep(1)
@@ -141,7 +149,7 @@ def stealth_script_inject(driver):
         print(f"Aviso ao injetar stealth script: {e}")
 
 # =============================================================
-# 🚀 DRIVER COM NATIVE SELENIUM MANAGER + APONTAMENTO CHROMIUM
+# 🚀 DRIVER COM NATIVE SELENIUM MANAGER + LOCALIZAÇÃO BINÁRIO
 # =============================================================
 def initialize_driver_instance():
     try:
@@ -155,7 +163,7 @@ def initialize_driver_instance():
     options = webdriver.ChromeOptions()
     options.page_load_strategy = 'eager'
     
-    # 🔥 CRÍTICO: Aponta diretamente para o executável do servidor (v148)
+    # Aponta para o binário Chromium estável do servidor Linux da Square
     if os.name != 'nt':
         options.binary_location = "/usr/bin/chromium"
     
@@ -172,7 +180,7 @@ def initialize_driver_instance():
     options.add_experimental_option('useAutomationExtension', False)
 
     try:
-        # Deixamos o Selenium 4 gerenciar nativamente o driver compatível com a v148
+        # Selenium Manager resolve nativamente a versão correta do driver para o binário v148
         driver = webdriver.Chrome(options=options)
         
         stealth(driver,
@@ -185,7 +193,7 @@ def initialize_driver_instance():
         )
         return driver
     except Exception as e:
-        print(f"⚠️ Erro ao instalar/iniciar driver padrão: {e}")
+        print(f"⚠️ Erro ao instanciar o driver padrão do Selenium: {e}")
         return None
 
 def setup_tabs(driver):
@@ -242,6 +250,7 @@ def setup_tabs(driver):
         sleep(12) 
         handle_original = driver.current_window_handle
 
+        # [COOKIES APÓS LOGIN - AVIATOR 1]
         try:
             if driver.find_elements(By.XPATH, '//iframe[contains(@src, "spribe") or contains(@src, "aviator")]'):
                 iframe = driver.find_element(By.XPATH, '//iframe[contains(@src, "spribe") or contains(@src, "aviator")]')
@@ -255,6 +264,7 @@ def setup_tabs(driver):
                 driver.switch_to.default_content()
         except: pass
 
+        # [📸 PRINT SELEÇÃO AVIATOR 1]
         try:
             driver.save_screenshot("aviator1_aberto.png")
             print("📸 [Print] Imagem 'aviator1_aberto.png' salva com sucesso.")
@@ -279,6 +289,7 @@ def setup_tabs(driver):
             print(f"⏳ Aguardando iframe Aviator 2... (tentativa {retry+1}/3)")
             sleep(5)
             
+        # [COOKIES APÓS LOGIN - AVIATOR 2]
         try:
             if driver.find_elements(By.XPATH, '//iframe[contains(@src, "spribe") or contains(@src, "aviator")]'):
                 iframe = driver.find_element(By.XPATH, '//iframe[contains(@src, "spribe") or contains(@src, "aviator")]')
@@ -292,6 +303,7 @@ def setup_tabs(driver):
                 driver.switch_to.default_content()
         except: pass
 
+        # [📸 PRINT SELEÇÃO AVIATOR 2]
         try:
             driver.save_screenshot("aviator2_aberto.png")
             print("📸 [Print] Imagem 'aviator2_aberto.png' salva com sucesso.")
