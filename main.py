@@ -46,9 +46,10 @@ except Exception as e:
 # =============================================================
 # ⚙️ VARIÁVEIS OFICIAIS GOATHBET
 # =============================================================
-URL_DO_SITE = "https://www.goathbet.com"
-LINK_AVIATOR_ORIGINAL = "https://www.goathbet.com/pt/casino/spribe/aviator"
-LINK_AVIATOR_2 = "https://www.goathbet.com/pt/casino/spribe/aviator-2"
+# Atualizado para o domínio .bet conforme link fornecido
+URL_DO_SITE = "https://www.goathbet.bet"
+LINK_AVIATOR_ORIGINAL = "https://www.goathbet.bet/pt/casino/spribe/aviator"
+LINK_AVIATOR_2 = "https://www.goathbet.bet/casino/spribe/aviator-vip"
 
 FIREBASE_PATH_ORIGINAL = "history"
 FIREBASE_PATH_2 = "aviator2"
@@ -75,7 +76,6 @@ def run_diagnostics():
     print("----------------------------------\n")
 
 def limpar_pngs_antigos():
-    """🧹 Remove todos os prints da raiz a cada reinício para economizar espaço"""
     try:
         arquivos_png = glob.glob("*.png")
         if arquivos_png:
@@ -108,7 +108,6 @@ def enviar_firebase_async(path, data):
     threading.Thread(target=_send, daemon=True).start()
 
 def verificar_modais_bloqueio(driver):
-    """Fecha ativamente modais conhecidos e o aviso de cookies na página externa"""
     try:
         btn_cookies = driver.find_element(By.XPATH, "//button[contains(text(), 'ACEITAR TODOS') or contains(., 'ACEITAR TODOS')]")
         driver.execute_script("arguments[0].click();", btn_cookies)
@@ -131,10 +130,6 @@ def verificar_modais_bloqueio(driver):
     except: pass
 
 def checar_e_aceitar_cookies_iframe(driver, estado_cookies):
-    """
-    Detecta e limpa o banner de cookies específico da Spribe que nasce dentro de cada iframe.
-    Usa uma trava local para clicar apenas uma vez e não entrar em loop.
-    """
     if estado_cookies.get('aceito', False):
         return
 
@@ -164,7 +159,6 @@ def checar_e_aceitar_cookies_iframe(driver, estado_cookies):
         pass
 
 def stealth_script_inject(driver):
-    """Injeta script adicional para mascarar o Selenium"""
     stealth_js = """
     Object.defineProperty(navigator, 'webdriver', {
       get: () => false,
@@ -220,7 +214,7 @@ def initialize_driver_instance():
 def setup_tabs(driver):
     stealth_script_inject(driver)
     
-    print("➡️ Acessando site e configurando abas com Anti-Detecção UC...")
+    print("➡️ Acessando site e configurando abas para economizar RAM...")
     try:
         driver.get(URL_DO_SITE)
         sleep(12) 
@@ -228,7 +222,7 @@ def setup_tabs(driver):
         verificar_modais_bloqueio(driver)
 
         botao_entrar = WebDriverWait(driver, 15).until(
-            EC.presence_of_element_located((By.開PATH if hasattr(By, '開PATH') else By.XPATH, "//button[contains(., 'Entrar')] | //a[contains(., 'Entrar')] | //*[text()='Entrar']"))
+            EC.presence_of_element_located((By.XPATH, "//button[contains(., 'Entrar')] | //a[contains(., 'Entrar')] | //*[text()='Entrar']"))
         )
         
         driver.execute_script("arguments[0].click();", botao_entrar)
@@ -259,7 +253,7 @@ def setup_tabs(driver):
     # 🔄 DIRECIONAMENTO ABAS DOS JOGOS
     # =============================================================
     try:
-        print("🎯 Configurando Aviator 1...")
+        print("🎯 Configurando Aviator 1 (Aba Principal)...")
         try:
             card_aviator1 = WebDriverWait(driver, 8).until(
                 EC.element_to_be_clickable((By.XPATH, "//img[@alt='Aviator']"))
@@ -272,9 +266,8 @@ def setup_tabs(driver):
         sleep(10) 
         handle_original = driver.current_window_handle
         print(f"✅ Aba Aviator 1 configurada.")
-        driver.save_screenshot("aviator1_inicial.png")
 
-        print("🎯 Configurando Aviator 2 (VIP)...")
+        print("🎯 Configurando Aviator 2 VIP (Nova Aba)...")
         driver.execute_script("window.open('');")
         handles = driver.window_handles
         handle_aviator2 = [h for h in handles if h != handle_original][0]
@@ -283,8 +276,6 @@ def setup_tabs(driver):
         driver.get(LINK_AVIATOR_2)
         sleep(12)
         
-        # Retry: tenta localizar iframe várias vezes
-        print(f"🔍 [DEBUG] URL Aviator 2: {driver.current_url}")
         for retry in range(3):
             if driver.find_elements(By.XPATH, '//iframe[contains(@src, "spribe") or contains(@src, "aviator")]'):
                 break
@@ -323,12 +314,14 @@ def start_bot(driver, game_handle, firebase_path):
     
     LAST_SENT = None
     ULTIMO_MULTIPLIER_TIME = time()
-    data_atual = datetime.now(TZ_BR).date()
 
     while not STOP_EVENT.is_set():
         now_br = datetime.now(TZ_BR)
-        if now_br.hour == 0 and now_br.minute <= 5 and now_br.date() != data_atual:
-            print(f"🌙 [{nome_log}] Reinício diário (00:00)...")
+        
+        # 🔥 Atualização: Reinício cravado às 23:59 todos os dias
+        if now_br.hour == 23 and now_br.minute == 59:
+            print(f"🌙 [{nome_log}] Reinício diário agendado (23:59)...")
+            STOP_EVENT.set()
             return
         
         raw_text = None
@@ -362,9 +355,10 @@ def start_bot(driver, game_handle, firebase_path):
                             "color": getColorClass(novo_valor),
                             "date": now_br.strftime("%Y-%m-%d")
                         }
-                        key = now_br.strftime("%Y-%m-%d_%H-%M-%S-%f").replace('.', '-')
+                        
+                        # Formato exato do Firebase: 2025-12-02_22-40-35-960956
+                        key = now_br.strftime("%Y-%m-%d_%H-%M-%S-%f")
                         enviar_firebase_async(f"{firebase_path}/{key}", payload)
-                        print(f"🔥 [{nome_log}] {payload['multiplier']}x")
                         LAST_SENT = novo_valor
                         ULTIMO_MULTIPLIER_TIME = time()
                 except: pass
