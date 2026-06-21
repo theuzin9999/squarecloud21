@@ -265,12 +265,11 @@ def setup_tabs(driver):
                 EC.element_to_be_clickable((By.XPATH, "//img[@alt='Aviator']"))
             )
             card_aviator1.click()
-            print("👉 Aviator 1 acessado via clique no card.")
         except Exception:
-            print("⚠️ Falha ao clicar no card do Aviator 1. Forçando navegação direta por link...")
+            print("⚠️ Falha ao clicar no card. Navegando diretamente...")
             driver.get(LINK_AVIATOR_ORIGINAL)
             
-        sleep(8) 
+        sleep(10) 
         handle_original = driver.current_window_handle
         print(f"✅ Aba Aviator 1 configurada.")
         driver.save_screenshot("aviator1_inicial.png")
@@ -282,7 +281,15 @@ def setup_tabs(driver):
         
         driver.switch_to.window(handle_aviator2)
         driver.get(LINK_AVIATOR_2)
-        sleep(6)
+        sleep(12)
+        
+        # Retry: tenta localizar iframe várias vezes
+        print(f"🔍 [DEBUG] URL Aviator 2: {driver.current_url}")
+        for retry in range(3):
+            if driver.find_elements(By.XPATH, '//iframe[contains(@src, "spribe") or contains(@src, "aviator")]'):
+                break
+            print(f"⏳ Aguardando iframe Aviator 2... (tentativa {retry+1}/3)")
+            sleep(5)
         
         print(f"✅ Aba Aviator 2 configurada.")
         driver.switch_to.window(handle_original)
