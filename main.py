@@ -48,7 +48,7 @@ except Exception as e:
 # =============================================================
 URL_DO_SITE = "https://www.goathbet.com"
 LINK_AVIATOR_ORIGINAL = "https://www.goathbet.com/pt/casino/spribe/aviator"
-LINK_AVIATOR_2 = "https://www.goathbet.com/pt/casino/spribe/aviator-2"
+LINK_AVIATOR_2 = "https://www.goathbet.bet/casino/spribe/aviator-vip"
 
 FIREBASE_PATH_ORIGINAL = "history"
 FIREBASE_PATH_2 = "aviator2"
@@ -324,6 +324,7 @@ def start_bot(driver, game_handle, firebase_path):
     LAST_SENT = None
     ULTIMO_MULTIPLIER_TIME = time()
     data_atual = datetime.now(TZ_BR).date()
+    contador_debug = 0
 
     while not STOP_EVENT.is_set():
         now_br = datetime.now(TZ_BR)
@@ -337,6 +338,9 @@ def start_bot(driver, game_handle, firebase_path):
             try:
                 driver.switch_to.window(game_handle)
                 driver.switch_to.default_content()
+                if nome_log == "AVIATOR 2" and contador_debug % 10 == 0:
+                    print(f"🔍 [DEBUG AVIATOR 2] URL: {driver.current_url} | Title: {driver.title}")
+                contador_debug += 1
                 iframe, hist_element = find_game_elements_safe(driver)
                 
                 if iframe:
