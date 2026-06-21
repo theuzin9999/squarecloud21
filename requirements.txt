@@ -1,7 +1,5 @@
-selenium==4.9.1
-undetected-chromedriver==3.5.5
-selenium-stealth
+selenium
+webdriver-manager
 firebase-admin
 pytz
 requests
-webdriver-manager
