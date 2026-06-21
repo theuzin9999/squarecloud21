@@ -27,8 +27,8 @@ if not firebase_admin._apps:
     firebase_admin.initialize_app(cred, {'databaseURL': DATABASE_URL})
 
 URL_DO_SITE = "https://www.goathbet.com"
-LINK_AVIATOR = "https://www.goathbet.bet/casino/spribe/aviator-vip"
-FIREBASE_PATH = "aviator2"
+LINK_AVIATOR = "https://www.goathbet.com/pt/casino/spribe/aviator"
+FIREBASE_PATH = "history"
 
 EMAIL = os.getenv("EMAIL")
 PASSWORD = os.getenv("PASSWORD")
@@ -72,10 +72,9 @@ def enviar_firebase_async(path, data):
     def _send():
         try:
             db.reference(path).set(data)
-            print(f"🔥 AVIATOR 2: {data['multiplier']}x às {data['time']}")
+            print(f"🔥 AVIATOR 1: {data['multiplier']}x às {data['time']}")
         except Exception:
             pass
-    import threading
     threading.Thread(target=_send, daemon=True).start()
 
 def verificar_modais_bloqueio(driver):
@@ -162,22 +161,21 @@ def initialize_driver():
         return None
 
 def setup_navegador(driver):
-    nome = "Aviator 2"
-    print(f"➡️ Configurando {nome}...")
+    print("➡️ Configurando navegador Aviator 1...")
     try:
-        print(f"[{nome}] Acessando site principal...")
+        print("Acessando site principal...")
         driver.get(URL_DO_SITE)
         sleep(15)
         verificar_modais_bloqueio(driver)
 
-        print(f"[{nome}] Clicando em Entrar...")
+        print("Clicando em Entrar...")
         botao_entrar = WebDriverWait(driver, 20).until(
             EC.presence_of_element_located((By.XPATH, "//button[contains(., 'Entrar')] | //a[contains(., 'Entrar')] | //*[text()='Entrar']"))
         )
         driver.execute_script("arguments[0].click();", botao_entrar)
         sleep(5)
 
-        print(f"[{nome}] Preenchendo login...")
+        print("Preenchendo login...")
         input_email = WebDriverWait(driver, 15).until(
             EC.visibility_of_element_located((By.XPATH, "//input[@id='email' or @name='email']"))
         )
@@ -188,34 +186,30 @@ def setup_navegador(driver):
         input_pass.send_keys(PASSWORD)
         botao_submit = driver.find_element(By.XPATH, "//button[@type='submit']")
         driver.execute_script("arguments[0].click();", botao_submit)
-        print(f"✅ [{nome}] Login enviado.")
+        print("✅ Login enviado.")
         sleep(15)
 
-        print(f"[{nome}] Acessando jogo VIP...")
+        print(f"Acessando jogo: {LINK_AVIATOR}")
         driver.get(LINK_AVIATOR)
         sleep(15)
 
-        print(f"[{nome}] Verificando iframe (5 tentativas)...")
+        print("Verificando iframe...")
         for i in range(5):
             if driver.find_elements(By.XPATH, '//iframe[contains(@src, "spribe") or contains(@src, "aviator")]'):
-                print(f"✅ [{nome}] Iframe encontrado.")
+                print("✅ Iframe encontrado.")
                 break
-            print(f"⏳ [{nome}] Aguardando iframe... ({i+1}/5)")
-            try:
-                driver.get(LINK_AVIATOR)
-            except:
-                pass
-            sleep(6)
+            print(f"⏳ Iframe... ({i+1}/5)")
+            sleep(4)
 
-        driver.save_screenshot("aviator2_aberto.png")
-        print(f"📸 [{nome}] Screenshot salvo.")
-        print(f"✅ [{nome}] Configurado com sucesso.")
+        driver.save_screenshot("aviator1_aberto.png")
+        print("📸 Screenshot salvo.")
+        print("✅ Aviator 1 configurado.")
         return True
     except Exception as e:
-        print(f"❌ ERRO CRÍTICO {nome}: {e}")
+        print(f"❌ ERRO CRÍTICO Aviator 1: {e}")
         print(traceback.format_exc())
         try:
-            driver.save_screenshot(f"erro_aviator2.png")
+            driver.save_screenshot("erro_aviator1.png")
         except: pass
         return False
 
@@ -232,52 +226,32 @@ def find_game_elements(driver):
         return None, None
 
 def start_coleta(driver):
-    print(f"🚀 [AVIATOR 2] Monitorando '{FIREBASE_PATH}'...")
+    print(f"🚀 [AVIATOR 1] Monitorando '{FIREBASE_PATH}'...")
     LAST_SENT = None
     ULTIMO_MULTIPLIER_TIME = time()
     data_atual = datetime.now(TZ_BR).date()
     estado_cookies = {'aceito': False}
-    contador_debug = 0
 
     while True:
         now_br = datetime.now(TZ_BR)
         if (now_br.hour == HORA_REINICIO and now_br.minute >= MINUTO_REINICIO) or (now_br.hour == 0 and now_br.minute <= 5 and now_br.date() != data_atual):
-            print(f"🌙 [AVIATOR 2] Reinício diário ({HORA_REINICIO}:{MINUTO_REINICIO:02d})...")
+            print(f"🌙 [AVIATOR 1] Reinício diário ({HORA_REINICIO}:{MINUTO_REINICIO:02d})...")
             break
 
         raw_text = None
         try:
             driver.switch_to.window(driver.current_window_handle)
             driver.switch_to.default_content()
-            if contador_debug % 10 == 0:
-                print(f"🔍 [DEBUG AVIATOR 2] URL: {driver.current_url} | Title: {driver.title}")
-            contador_debug += 1
-
             iframe, hist_element = find_game_elements(driver)
-
-            if not iframe:
-                if contador_debug % 10 == 0:
-                    print(f"⚠️ [AVIATOR 2] Iframe NÃO encontrado.")
-            else:
+            if iframe:
                 checar_e_aceitar_cookies_iframe(driver, estado_cookies)
-
-            if not hist_element:
-                if contador_debug % 30 == 0:
-                    print(f"⚠️ [AVIATOR 2] Elemento histórico NÃO encontrado.")
-            else:
-                try:
-                    first_payout = hist_element.find_element(
-                        By.CSS_SELECTOR, ".payout:first-child, .bubble-multiplier:first-child"
-                    )
-                    raw_text = first_payout.get_attribute("innerText")
-                    if not raw_text and contador_debug % 30 == 0:
-                        print(f"⚠️ [AVIATOR 2] first_payout vazio.")
-                except Exception as e:
-                    if contador_debug % 30 == 0:
-                        print(f"⚠️ [AVIATOR 2] Erro ao buscar payout: {e}")
+            if hist_element:
+                first_payout = hist_element.find_element(
+                    By.CSS_SELECTOR, ".payout:first-child, .bubble-multiplier:first-child"
+                )
+                raw_text = first_payout.get_attribute("innerText")
         except Exception as e:
-            if contador_debug % 30 == 0:
-                print(f"⚠️ [AVIATOR 2] Exceção: {e}")
+            pass
 
         if raw_text:
             clean_text = raw_text.strip().lower().replace('x', '').replace('\n', '').strip()
@@ -294,13 +268,13 @@ def start_coleta(driver):
                         import uuid
                         key = now_br.strftime("%Y-%m-%d_%H-%M-%S") + "-" + str(uuid.uuid4().hex)[:8]
                         enviar_firebase_async(f"{FIREBASE_PATH}/{key}", payload)
-                        print(f"🔥 [AVIATOR 2] {payload['multiplier']}x")
+                        print(f"🔥 [AVIATOR 1] {payload['multiplier']}x")
                         LAST_SENT = novo_valor
                         ULTIMO_MULTIPLIER_TIME = time()
                 except: pass
 
         if (time() - ULTIMO_MULTIPLIER_TIME) > TEMPO_MAX_INATIVIDADE:
-            print(f"⚠️ [AVIATOR 2] Sem dados por {TEMPO_MAX_INATIVIDADE}s.")
+            print(f"⚠️ [AVIATOR 1] Sem dados por {TEMPO_MAX_INATIVIDADE}s.")
             break
 
         sleep(POLLING_INTERVAL + 0.5)
@@ -311,14 +285,14 @@ def main():
         print("❗ Configure EMAIL e PASSWORD.")
         sys.exit()
     print("==============================================")
-    print("     AVIATOR 2 (VIP) - INICIADO (24H)        ")
+    print("     AVIATOR 1 - INICIADO (24H)              ")
     print("==============================================")
     limpar_pngs_antigos()
 
     while True:
         driver = None
         try:
-            print("\n🔵 Iniciando ciclo Aviator 2...")
+            print("\n🔵 Iniciando ciclo Aviator 1...")
             driver = initialize_driver()
             if not driver:
                 print("⚠️ Falha driver. Aguardando...")
@@ -330,13 +304,13 @@ def main():
             else:
                 print("⚠️ Falha setup. Reiniciando...")
         except Exception as e:
-            print(f"\n❌ ERRO CICLO AVIATOR 2: {e}")
+            print(f"\n❌ ERRO CICLO AVIATOR 1: {e}")
             traceback.print_exc()
         finally:
             if driver:
                 try:
                     driver.quit()
-                    print("🗑️ Driver Aviator 2 encerrado.")
+                    print("🗑️ Driver Aviator 1 encerrado.")
                 except: pass
             gc.collect()
             sleep(5)
