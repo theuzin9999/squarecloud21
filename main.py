@@ -16,6 +16,7 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
 
 from undetected_chromedriver import ChromeOptions
+import undetected_chromedriver as uc
 from selenium_stealth import stealth
 
 import firebase_admin
