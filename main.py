@@ -15,7 +15,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
 
-from undetected_chromedriver import ChromeOptions
+# 🔥 BIBLIOTECA DE CAMUFLAGEM
 import undetected_chromedriver as uc
 from selenium_stealth import stealth
 
@@ -23,10 +23,10 @@ import firebase_admin
 from firebase_admin import credentials, db
 
 # =============================================================
-# ⚠️ CONTROLE GLOBAL
+# ⚠️ CONTROLE GLOBAL DE THREADS E DRIVER
 # =============================================================
+DRIVER_LOCK = threading.Lock() 
 STOP_EVENT = threading.Event() 
-DRIVER_LOCK = threading.Lock()
 
 # =============================================================
 # 🔥 CONFIGURAÇÃO FIREBASE
@@ -48,7 +48,7 @@ except Exception as e:
 # =============================================================
 URL_DO_SITE = "https://www.goathbet.com"
 LINK_AVIATOR_ORIGINAL = "https://www.goathbet.com/pt/casino/spribe/aviator"
-LINK_AVIATOR_2 = "https://www.goathbet.bet/casino/spribe/aviator-vip"
+LINK_AVIATOR_2 = "https://www.goathbet.com/pt/casino/spribe/aviator-2"
 
 FIREBASE_PATH_ORIGINAL = "history"
 FIREBASE_PATH_2 = "aviator2"
@@ -56,11 +56,9 @@ FIREBASE_PATH_2 = "aviator2"
 EMAIL = os.getenv("EMAIL")
 PASSWORD = os.getenv("PASSWORD")
 
-POLLING_INTERVAL = 1.0
-TEMPO_MAX_INATIVIDADE = 360
+POLLING_INTERVAL = 1.0       
+TEMPO_MAX_INATIVIDADE = 360 
 TZ_BR = pytz.timezone("America/Sao_Paulo")
-HORA_REINICIO = 23
-MINUTO_REINICIO = 59
 
 # =============================================================
 # 🔧 FUNÇÕES AUXILIARES E TRATAMENTO DE MODAIS
@@ -103,8 +101,7 @@ def enviar_firebase_async(path, data):
         try:
             db.reference(path).set(data)
             nome_jogo = path.split('/')[0].upper()
-            if nome_jogo == "HISTORY":
-                nome_jogo = "AVIATOR 1"
+            if nome_jogo == "HISTORY": nome_jogo = "AVIATOR 1"
             print(f"🔥 {nome_jogo}: {data['multiplier']}x às {data['time']}")
         except Exception:
             pass 
@@ -183,54 +180,29 @@ def stealth_script_inject(driver):
 # =============================================================
 # 🚀 DRIVER COM UNDETECTED-CHROMEDRIVER
 # =============================================================
-def initialize_driver_instance(nome_jogo="Navegador"):
-    """Inicializa uma instância do Chrome UC com flags otimizadas para servidor"""
+def initialize_driver_instance():
     try:
         if os.name == 'nt': 
             subprocess.run("taskkill /f /im chromedriver.exe", shell=True, stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
             subprocess.run("taskkill /f /im chrome.exe", shell=True, stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
         else:
             subprocess.run("killall -9 chromium-browser chromium chromedriver 2>/dev/null", shell=True)
-        sleep(2)
     except: pass
 
-    options = ChromeOptions()
+    options = uc.ChromeOptions()
     options.page_load_strategy = 'eager'
     
     options.add_argument("--headless=new")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-popup-blocking")
-    options.add_argument("--disable-gpu")
-    options.add_argument("--disable-extensions")
-    options.add_argument("--disable-software-rasterizer")
-    options.add_argument("--disable-background-networking")
-    options.add_argument("--disable-default-apps")
-    options.add_argument("--disable-sync")
-    options.add_argument("--metrics-recording-only")
-    options.add_argument("--no-first-run")
-    options.add_argument("--mute-audio")
-    options.add_argument("--disable-translate")
-    options.add_argument("--disable-background-timer-throttling")
-    options.add_argument("--disable-renderer-backgrounding")
-    options.add_argument("--disable-client-side-phishing-detection")
-    options.add_argument("--disable-component-update")
-    options.add_argument("--disable-domain-reliability")
-    options.add_argument("--disable-features=TranslateUI")
-    options.add_argument("--disable-hang-monitor")
-    options.add_argument("--disable-ipc-flooding-protection")
-    options.add_argument("--disable-prompt-on-repost")
-    options.add_argument("--disable-wake-on-wifi")
-    options.add_argument("--memory-pressure-off")
-    options.add_argument("--max_old_space_size=256")
     
-    options.add_argument("--window-size=1280,720")
+    options.add_argument("--window-size=1920,1080")
     options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
     options.add_argument("--disable-blink-features=AutomationControlled")
 
     try:
-        print(f"[{nome_jogo}] Iniciando Chrome UC...")
-        driver = uc.Chrome(options=options, version_main=148, use_subprocess=False)
+        driver = uc.Chrome(options=options, version_main=148)
         
         stealth(driver,
             languages=["pt-BR", "pt"],
@@ -240,108 +212,92 @@ def initialize_driver_instance(nome_jogo="Navegador"):
             renderer="Intel Iris OpenGL Engine",
             fix_hairline=True,
         )
-        print(f"[{nome_jogo}] Chrome UC iniciado com sucesso.")
         return driver
     except Exception as e:
-        print(f"⚠️ [{nome_jogo}] Erro ao instalar/iniciar driver: {e}")
+        print(f"⚠️ Erro ao instalar/iniciar driver: {e}")
         return None
 
-def setup_navegador_unico(driver, url_jogo, nome_jogo):
-    """
-    Faz login uma vez no site principal e abre um navegador separado para o jogo especificado.
-    Retorna o driver pronto ou None em caso de falha.
-    """
-    print(f"➡️ Configurando {nome_jogo} em navegador dedicado...")
-    tentativas = 0
-    max_tentativas = 3
+def setup_tabs(driver):
+    stealth_script_inject(driver)
     
-    while tentativas < max_tentativas:
-        tentativas += 1
-        try:
-            if tentativas > 1:
-                print(f"[{nome_jogo}] 🔄 Tentativa {tentativas}/{max_tentativas}...")
-                sleep(10)
-            
-            print(f"[{nome_jogo}] Acessando site principal...")
-            driver.get(URL_DO_SITE)
-            sleep(18)
-            
-            verificar_modais_bloqueio(driver)
+    print("➡️ Acessando site e configurando abas com Anti-Detecção UC...")
+    try:
+        driver.get(URL_DO_SITE)
+        sleep(12) 
+        
+        verificar_modais_bloqueio(driver)
 
-            print(f"[{nome_jogo}] Procurando botão Entrar (timeout 25s)...")
-            botao_entrar = WebDriverWait(driver, 25).until(
-                EC.presence_of_element_located((By.XPATH, "//button[contains(., 'Entrar')] | //a[contains(., 'Entrar')] | //*[text()='Entrar']"))
+        botao_entrar = WebDriverWait(driver, 15).until(
+            EC.presence_of_element_located((By.開PATH if hasattr(By, '開PATH') else By.XPATH, "//button[contains(., 'Entrar')] | //a[contains(., 'Entrar')] | //*[text()='Entrar']"))
+        )
+        
+        driver.execute_script("arguments[0].click();", botao_entrar)
+        print("👉 Botão 'Entrar' clicado via JS com sucesso.")
+        sleep(4)
+        
+        input_email = WebDriverWait(driver, 10).until(
+            EC.visibility_of_element_located((By.XPATH, "//input[@id='email' or @name='email']"))
+        )
+        input_email.send_keys(EMAIL)
+        
+        input_pass = driver.find_element(By.XPATH, "//input[@id='password' or @name='password']")
+        input_pass.send_keys(PASSWORD)
+        
+        botao_submit = driver.find_element(By.XPATH, "//button[@type='submit']")
+        driver.execute_script("arguments[0].click();", botao_submit)
+        
+        print("✅ Formulário de login enviado.")
+        sleep(12) 
+    except Exception as e:
+        print(f"❌ ERRO CRÍTICO NAS ETAPAS DE LOGIN: {e}")
+        try:
+            driver.save_screenshot("erro_login.png")
+        except: pass
+        return None
+
+    # =============================================================
+    # 🔄 DIRECIONAMENTO ABAS DOS JOGOS
+    # =============================================================
+    try:
+        print("🎯 Configurando Aviator 1...")
+        try:
+            card_aviator1 = WebDriverWait(driver, 8).until(
+                EC.element_to_be_clickable((By.XPATH, "//img[@alt='Aviator']"))
             )
+            card_aviator1.click()
+        except Exception:
+            print("⚠️ Falha ao clicar no card. Navegando diretamente...")
+            driver.get(LINK_AVIATOR_ORIGINAL)
             
-            driver.execute_script("arguments[0].click();", botao_entrar)
-            print(f"👉 [{nome_jogo}] Botão 'Entrar' clicado via JS.")
-            sleep(6)
-            
-            print(f"[{nome_jogo}] Preenchendo credenciais...")
-            input_email = WebDriverWait(driver, 15).until(
-                EC.visibility_of_element_located((By.XPATH, "//input[@id='email' or @name='email']"))
-            )
-            input_email.clear()
-            input_email.send_keys(EMAIL)
-            
-            input_pass = driver.find_element(By.XPATH, "//input[@id='password' or @name='password']")
-            input_pass.clear()
-            input_pass.send_keys(PASSWORD)
-            
-            botao_submit = driver.find_element(By.XPATH, "//button[@type='submit']")
-            driver.execute_script("arguments[0].click();", botao_submit)
-            
-            print(f"✅ [{nome_jogo}] Formulário de login enviado.")
-            sleep(18)
-            
-            print(f"[{nome_jogo}] Acessando jogo: {url_jogo}")
-            try:
-                driver.get(url_jogo)
-            except Exception as e:
-                if "ERR_CONNECTION_RESET" in str(e) or "ERR_CONNECTION_CLOSED" in str(e) or "ERR_HTTP2_PROTOCOL_ERROR" in str(e):
-                    print(f"[{nome_jogo}] ⚠️ Erro de conexão no jogo (429/protocolo), aguardando...")
-                    sleep(10)
-                    driver.get(url_jogo)
-                else:
-                    raise
-            
-            sleep(15)
-            
-            print(f"[{nome_jogo}] Verificando iframe do jogo...")
-            iframe_encontrado = False
-            for retry in range(5):
-                try:
-                    if driver.find_elements(By.XPATH, '//iframe[contains(@src, "spribe") or contains(@src, "aviator")]'):
-                        print(f"✅ [{nome_jogo}] Iframe encontrado.")
-                        iframe_encontrado = True
-                        break
-                except:
-                    pass
-                print(f"⏳ [{nome_jogo}] Aguardando iframe... (tentativa {retry+1}/5)")
-                sleep(4)
-            
-            if not iframe_encontrado:
-                print(f"⚠️ [{nome_jogo}] Iframe não encontrado após 5 tentativas, mas continuando...")
-            
-            driver.save_screenshot(f"{nome_jogo.replace(' ', '_')}_aberto.png")
-            print(f"📸 [{nome_jogo}] Screenshot salvo.")
-            
-            print(f"✅ [{nome_jogo}] Navegador dedicado configurado com sucesso.")
-            return driver
-            
-        except Exception as e:
-            erro_msg = f"[{nome_jogo}] ❌ ERRO TENTATIVA {tentativas}/{max_tentativas}: {e}"
-            print(erro_msg)
-            try:
-                driver.save_screenshot(f"erro_login_{nome_jogo.replace(' ', '_')}_t{tentativas}.png")
-                print(f"📸 [{nome_jogo}] Screenshot de erro salvo.")
-            except: pass
-            
-            if tentativas >= max_tentativas:
-                print(f"[{nome_jogo}] Stacktrace: {traceback.format_exc()}")
-                return None
-    
-    return None
+        sleep(10) 
+        handle_original = driver.current_window_handle
+        print(f"✅ Aba Aviator 1 configurada.")
+        driver.save_screenshot("aviator1_inicial.png")
+
+        print("🎯 Configurando Aviator 2 (VIP)...")
+        driver.execute_script("window.open('');")
+        handles = driver.window_handles
+        handle_aviator2 = [h for h in handles if h != handle_original][0]
+        
+        driver.switch_to.window(handle_aviator2)
+        driver.get(LINK_AVIATOR_2)
+        sleep(12)
+        
+        # Retry: tenta localizar iframe várias vezes
+        print(f"🔍 [DEBUG] URL Aviator 2: {driver.current_url}")
+        for retry in range(3):
+            if driver.find_elements(By.XPATH, '//iframe[contains(@src, "spribe") or contains(@src, "aviator")]'):
+                break
+            print(f"⏳ Aguardando iframe Aviator 2... (tentativa {retry+1}/3)")
+            sleep(5)
+        
+        print(f"✅ Aba Aviator 2 configurada.")
+        driver.switch_to.window(handle_original)
+        return {FIREBASE_PATH_ORIGINAL: handle_original, FIREBASE_PATH_2: handle_aviator2}
+        
+    except Exception as e:
+        print(f"⚠️ Falha fatal ao estruturar as páginas internas do jogo: {e}")
+        return None
 
 # =============================================================
 # 🎮 BUSCA DE ELEMENTOS
@@ -361,31 +317,30 @@ def find_game_elements_safe(driver):
 # =============================================================
 # 🔄 LOOP DE CAPTURA COM SUPORTE ANTIBLOCK COOKIES
 # =============================================================
-def start_bot(driver, firebase_path, nome_jogo):
-    print(f"🚀 [{nome_jogo}] Monitorando '{firebase_path}'...")
+def start_bot(driver, game_handle, firebase_path):
+    nome_log = "AVIATOR 1" if "history" in firebase_path else "AVIATOR 2"
+    print(f"🚀 [{nome_log}] Monitorando '{firebase_path}'...")
     
     LAST_SENT = None
     ULTIMO_MULTIPLIER_TIME = time()
     data_atual = datetime.now(TZ_BR).date()
-    estado_cookies = {'aceito': False}
-    primeira_execucao = True
 
     while not STOP_EVENT.is_set():
         now_br = datetime.now(TZ_BR)
-        if (now_br.hour == HORA_REINICIO and now_br.minute >= MINUTO_REINICIO) or (now_br.hour == 0 and now_br.minute <= 5 and now_br.date() != data_atual):
-            print(f"🌙 [{nome_jogo}] Reinício diário ({HORA_REINICIO}:{MINUTO_REINICIO:02d})...")
+        if now_br.hour == 0 and now_br.minute <= 5 and now_br.date() != data_atual:
+            print(f"🌙 [{nome_log}] Reinício diário (00:00)...")
             return
         
         raw_text = None
         with DRIVER_LOCK:
             if STOP_EVENT.is_set(): break
             try:
-                driver.switch_to.window(driver.current_window_handle)
+                driver.switch_to.window(game_handle)
                 driver.switch_to.default_content()
                 iframe, hist_element = find_game_elements_safe(driver)
                 
                 if iframe:
-                    checar_e_aceitar_cookies_iframe(driver, estado_cookies)
+                    checar_e_aceitar_cookies_iframe(driver, {'aceito': False})
                 
                 if hist_element:
                     first_payout = hist_element.find_element(
@@ -400,7 +355,7 @@ def start_bot(driver, firebase_path, nome_jogo):
             if clean_text:
                 try:
                     novo_valor = float(clean_text)
-                    if primeira_execucao or novo_valor != LAST_SENT:
+                    if novo_valor != LAST_SENT:
                         payload = {
                             "multiplier": f"{novo_valor:.2f}",
                             "time": now_br.strftime("%H:%M:%S"),
@@ -409,84 +364,49 @@ def start_bot(driver, firebase_path, nome_jogo):
                         }
                         key = now_br.strftime("%Y-%m-%d_%H-%M-%S-%f").replace('.', '-')
                         enviar_firebase_async(f"{firebase_path}/{key}", payload)
-                        print(f"🔥 [{nome_jogo}] {payload['multiplier']}x")
+                        print(f"🔥 [{nome_log}] {payload['multiplier']}x")
                         LAST_SENT = novo_valor
                         ULTIMO_MULTIPLIER_TIME = time()
-                        primeira_execucao = False
                 except: pass
-        else:
-            primeira_execucao = True
 
         if (time() - ULTIMO_MULTIPLIER_TIME) > TEMPO_MAX_INATIVIDADE:
-            print(f"⚠️ [{nome_jogo}] Sem dados por {TEMPO_MAX_INATIVIDADE}s. Reiniciando...")
+            print(f"⚠️ [{nome_log}] Sem dados por {TEMPO_MAX_INATIVIDADE}s. Reiniciando...")
+            STOP_EVENT.set()
             return
             
         sleep(POLLING_INTERVAL + 0.5)
 
 # =============================================================
-# 🚀 SUPERVISOR DEDICADO POR NAVEGADOR
+# 🚀 SUPERVISOR (MAIN LOOP)
 # =============================================================
-def supervisor_navegador(driver, firebase_path, nome_jogo):
-    """Gerencia ciclo completo de um navegador dedicado"""
-    try:
-        start_bot(driver, firebase_path, nome_jogo)
-    except Exception as e:
-        print(f"❌ [{nome_jogo}] Erro no supervisor: {e}")
-    finally:
-        try:
-            driver.quit()
-            print(f"🗑️ [{nome_jogo}] Driver encerrado.")
-        except: pass
-
 def rodar_ciclo_monitoramento():
+    DRIVER = None
+    STOP_EVENT.clear() 
+    
     limpar_pngs_antigos()
     
-    driver1 = None
-    driver2 = None
-    
     try:
-        print("\n🔵 INICIANDO NAVEGADOR 1 - AVIATOR 1...")
-        driver1 = initialize_driver_instance("Aviator 1")
-        if not driver1:
-            print("⚠️ Falha ao instanciar driver 1.")
+        print("\n🔵 INICIANDO NOVO CICLO COM UNDETECTED-CHROMEDRIVER...")
+        DRIVER = initialize_driver_instance()
+        
+        if not DRIVER:
+            print("⚠️ Falha ao instanciar o driver. Aguardando para nova tentativa...")
+            sleep(10)
             return
+
+        handles = setup_tabs(DRIVER)
         
-        resultado1 = setup_navegador_unico(driver1, LINK_AVIATOR_ORIGINAL, "Aviator 1")
-        if not resultado1:
-            print("⚠️ Falha ao configurar Aviator 1.")
-            if driver1:
-                try: driver1.quit()
-                except: pass
+        if not handles:
+            print("⚠️ Ciclo interrompido por falha de autenticação. Reiniciando driver...")
             return
-        driver1 = resultado1
+
+        handle_original = handles[FIREBASE_PATH_ORIGINAL]
+        handle_aviator2 = handles[FIREBASE_PATH_2]
+
+        print("⏳ Monitoramento iniciado (Threads)...")
         
-        sleep(3)
-        
-        print("\n🔵 INICIANDO NAVEGADOR 2 - AVIATOR 2 (VIP)...")
-        driver2 = initialize_driver_instance("Aviator 2")
-        if not driver2:
-            print("⚠️ Falha ao instanciar driver 2.")
-            if driver1:
-                try: driver1.quit()
-                except: pass
-            return
-        
-        resultado2 = setup_navegador_unico(driver2, LINK_AVIATOR_2, "Aviator 2")
-        if not resultado2:
-            print("⚠️ Falha ao configurar Aviator 2.")
-            if driver1:
-                try: driver1.quit()
-                except: pass
-            if driver2:
-                try: driver2.quit()
-                except: pass
-            return
-        driver2 = resultado2
-        
-        print("\n⏳ Monitoramento iniciado (2 Navegadores Dedicados)...")
-        
-        t1 = threading.Thread(target=supervisor_navegador, args=(driver1, FIREBASE_PATH_ORIGINAL, "Aviator 1"), daemon=True)
-        t2 = threading.Thread(target=supervisor_navegador, args=(driver2, FIREBASE_PATH_2, "Aviator 2"), daemon=True)
+        t1 = threading.Thread(target=start_bot, args=(DRIVER, handle_original, FIREBASE_PATH_ORIGINAL), daemon=True)
+        t2 = threading.Thread(target=start_bot, args=(DRIVER, handle_aviator2, FIREBASE_PATH_2), daemon=True)
 
         t1.start()
         t2.start()
@@ -501,21 +421,12 @@ def rodar_ciclo_monitoramento():
     except Exception as e:
         print(f"\n❌ ERRO NO CICLO: {e}")
         traceback.print_exc()
-        try:
-            if driver1: driver1.save_screenshot("erro_ciclo_driver1.png")
-            if driver2: driver2.save_screenshot("erro_ciclo_driver2.png")
-        except: pass
     finally:
         STOP_EVENT.set() 
-        if driver1:
+        if DRIVER:
             try:
-                driver1.quit()
-                print("🗑️ Driver 1 encerrado.")
-            except: pass
-        if driver2:
-            try:
-                driver2.quit()
-                print("🗑️ Driver 2 encerrado.")
+                DRIVER.quit()
+                print("🗑️ Driver encerrado com sucesso.")
             except: pass
         gc.collect()
         sleep(5) 
