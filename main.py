@@ -198,8 +198,10 @@ def initialize_driver_instance():
     options.add_argument("--disable-popup-blocking")
     
     options.add_argument("--window-size=1920,1080")
-    options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
+    options.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
     options.add_argument("--disable-blink-features=AutomationControlled")
+    options.add_argument("--disable-web-security")
+    options.add_argument("--allow-running-insecure-content")
 
     try:
         driver = uc.Chrome(options=options, version_main=148)
@@ -281,17 +283,12 @@ def setup_tabs(driver):
         
         driver.switch_to.window(handle_aviator2)
         driver.get(LINK_AVIATOR_2)
-        sleep(12)
+        sleep(20)
         
-        # Retry: tenta localizar iframe várias vezes
-        print(f"🔍 [DEBUG] URL Aviator 2: {driver.current_url}")
-        for retry in range(3):
-            if driver.find_elements(By.XPATH, '//iframe[contains(@src, "spribe") or contains(@src, "aviator")]'):
-                break
-            print(f"⏳ Aguardando iframe Aviator 2... (tentativa {retry+1}/3)")
-            sleep(5)
-        
+        print(f"🔗 Aviator 2 URL: {driver.current_url}")
+        driver.save_screenshot("aviator2_inicial.png")
         print(f"✅ Aba Aviator 2 configurada.")
+        
         driver.switch_to.window(handle_original)
         return {FIREBASE_PATH_ORIGINAL: handle_original, FIREBASE_PATH_2: handle_aviator2}
         
