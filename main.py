@@ -1,16 +1,13 @@
 import os
-import sys
 import threading
 import time
 from datetime import datetime
 import pytz
 from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from webdriver_manager.chrome import ChromeDriverManager
 import firebase_admin
 from firebase_admin import credentials, db
 
@@ -23,19 +20,19 @@ if not firebase_admin._apps:
 # CONFIGURAÇÕES
 URL_LOGIN = "https://go.goathbet.com/c/7vo"
 LINK_AVIATOR_1 = "https://www.goathbet.bet/casino/spribe/aviator"
-LINK_AVIATOR_2 = "https://www.goathbet.bet/casino/spribe/aviator-vip"
 TZ_BR = pytz.timezone("America/Sao_Paulo")
 
 def get_driver():
-    chrome_options = Options()
-    chrome_options.add_argument("--headless=new")
-    chrome_options.add_argument("--no-sandbox")
-    chrome_options.add_argument("--disable-dev-shm-usage")
-    chrome_options.add_argument("--window-size=1920,1080")
-    # O User-Agent deve ser padrão e simples
-    chrome_options.add_argument("user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
+    options = Options()
+    options.add_argument("--headless=new")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--window-size=1920,1080")
+    # Define o caminho do binário do servidor e evita conflitos de driver
+    options.binary_location = "/usr/bin/chromium"
     
-    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
+    # Inicia sem o webdriver-manager para evitar erros de versão
+    driver = webdriver.Chrome(options=options)
     return driver
 
 def realizar_login(driver):
@@ -54,9 +51,11 @@ def monitorar_jogo(driver, url, path_firebase):
     last_val = None
     while True:
         try:
-            # Espera resiliente para encontrar o iframe e o elemento
+            # Aguarda o iframe carregar e alterna para ele
             iframe = WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.XPATH, '//iframe[contains(@src, "spribe")]')))
             driver.switch_to.frame(iframe)
+            
+            # Localiza o elemento do multiplicador
             elemento = WebDriverWait(driver, 15).until(EC.visibility_of_element_located((By.CSS_SELECTOR, ".payouts-block, .bubble-multiplier")))
             
             val_text = elemento.text.replace('x', '').strip()
@@ -74,8 +73,6 @@ def monitorar_jogo(driver, url, path_firebase):
 if __name__ == "__main__":
     driver = get_driver()
     realizar_login(driver)
-    
-    # Executa em uma thread para manter o controle
     threading.Thread(target=monitorar_jogo, args=(driver, LINK_AVIATOR_1, "history"), daemon=True).start()
     
     while True:
