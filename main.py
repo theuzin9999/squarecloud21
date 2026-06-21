@@ -46,9 +46,9 @@ except Exception as e:
 # =============================================================
 # ⚙️ VARIÁVEIS OFICIAIS GOATHBET
 # =============================================================
-URL_DO_SITE = "https://go.goathbet.com/c/7vo"
-LINK_AVIATOR_ORIGINAL = "https://www.goathbet.bet/casino/spribe/aviator"
-LINK_AVIATOR_2 = "https://www.goathbet.bet/casino/spribe/aviator-vip"
+URL_DO_SITE = "https://www.goathbet.com"
+LINK_AVIATOR_ORIGINAL = "https://www.goathbet.com/pt/casino/spribe/aviator"
+LINK_AVIATOR_2 = "https://www.goathbet.com/pt/casino/spribe/aviator-2"
 
 FIREBASE_PATH_ORIGINAL = "history"
 FIREBASE_PATH_2 = "aviator2"
@@ -299,14 +299,11 @@ def find_game_elements_safe(driver):
     try:
         driver.implicitly_wait(2)
         iframe = driver.find_element(By.XPATH, '//iframe[contains(@src, "spribe") or contains(@src, "aviator")]')
-        print(f"🔍 Iframe encontrado: {iframe.get_attribute('src')[:80] if iframe.get_attribute('src') else 'sem src'}")
         driver.switch_to.frame(iframe)
-        hist = driver.find_element(By.CSS_SELECTOR, "app-stats-widget, .payouts-block")
-        print(f"🔍 Elemento histórico encontrado")
+        hist = driver.find_element(By.CSS_SELECTOR, ".payouts-block, app-stats-widget")
         driver.implicitly_wait(10)
         return iframe, hist
     except Exception as e:
-        print(f"⚠️ Erro ao encontrar elementos do jogo: {e}")
         driver.implicitly_wait(10)
         return None, None
 
@@ -315,36 +312,36 @@ def find_game_elements_safe(driver):
 # =============================================================
 def start_bot(driver, game_handle, firebase_path):
     nome_log = "AVIATOR 1" if "history" in firebase_path else "AVIATOR 2"
-    print(f"🚀 INICIADO: {nome_log}")
+    print(f"🚀 [{nome_log}] Monitorando '{firebase_path}'...")
     
     LAST_SENT = None
     ULTIMO_MULTIPLIER_TIME = time()
-    
-    estado_cookies = {'aceito': False}
+    data_atual = datetime.now(TZ_BR).date()
 
-    print(f"🔄 [{nome_log}] Entrando no loop de captura...")
     while not STOP_EVENT.is_set():
+        now_br = datetime.now(TZ_BR)
+        if now_br.hour == 0 and now_br.minute <= 5 and now_br.date() != data_atual:
+            print(f"🌙 [{nome_log}] Reinício diário (00:00)...")
+            return
+        
         raw_text = None
         with DRIVER_LOCK:
             if STOP_EVENT.is_set(): break
             try:
                 driver.switch_to.window(game_handle)
                 driver.switch_to.default_content()
-                print(f"🔄 [{nome_log}] Procurando iframe...")
                 iframe, hist_element = find_game_elements_safe(driver)
                 
                 if iframe:
-                    checar_e_aceitar_cookies_iframe(driver, estado_cookies)
+                    checar_e_aceitar_cookies_iframe(driver, {'aceito': False})
                 
                 if hist_element:
                     first_payout = hist_element.find_element(
-                        By.CSS_SELECTOR,
-                        "[appcoloredmultiplier].payout:first-child, .payout:first-child, .bubble-multiplier:first-child"
+                        By.CSS_SELECTOR, ".payout:first-child, .bubble-multiplier:first-child"
                     )
                     raw_text = first_payout.get_attribute("innerText")
-                    print(f"[DEBUG] raw_text coletado: '{raw_text}'")
             except Exception as e:
-                print(f"[DEBUG] Erro ao coletar payout: {e}")
+                pass
         
         if raw_text:
             clean_text = raw_text.strip().lower().replace('x', '').replace('\n', '').strip()
@@ -352,22 +349,21 @@ def start_bot(driver, game_handle, firebase_path):
                 try:
                     novo_valor = float(clean_text)
                     if novo_valor != LAST_SENT:
-                        now_br = datetime.now(TZ_BR)
                         payload = {
                             "multiplier": f"{novo_valor:.2f}",
                             "time": now_br.strftime("%H:%M:%S"),
                             "color": getColorClass(novo_valor),
                             "date": now_br.strftime("%Y-%m-%d")
                         }
-                        chave_firebase = now_br.strftime('%Y-%m-%d_%H-%M-%S-%f')[:-3]
-                        enviar_firebase_async(f"{firebase_path}/{chave_firebase}", payload)
-                        
+                        key = now_br.strftime("%Y-%m-%d_%H-%M-%S-%f").replace('.', '-')
+                        enviar_firebase_async(f"{firebase_path}/{key}", payload)
+                        print(f"🔥 [{nome_log}] {payload['multiplier']}x")
                         LAST_SENT = novo_valor
                         ULTIMO_MULTIPLIER_TIME = time()
                 except: pass
 
         if (time() - ULTIMO_MULTIPLIER_TIME) > TEMPO_MAX_INATIVIDADE:
-            print(f"⚠️ [{nome_log}] Sem dados por mais de {TEMPO_MAX_INATIVADE}s. Reiniciando...")
+            print(f"⚠️ [{nome_log}] Sem dados por {TEMPO_MAX_INATIVIDADE}s. Reiniciando...")
             STOP_EVENT.set()
             return
             
