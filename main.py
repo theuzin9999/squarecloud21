@@ -183,13 +183,15 @@ def stealth_script_inject(driver):
 # =============================================================
 # 🚀 DRIVER COM UNDETECTED-CHROMEDRIVER
 # =============================================================
-def initialize_driver_instance():
+def initialize_driver_instance(nome_jogo="Navegador"):
+    """Inicializa uma instância do Chrome UC com flags otimizadas para servidor"""
     try:
         if os.name == 'nt': 
             subprocess.run("taskkill /f /im chromedriver.exe", shell=True, stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
             subprocess.run("taskkill /f /im chrome.exe", shell=True, stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
         else:
             subprocess.run("killall -9 chromium-browser chromium chromedriver 2>/dev/null", shell=True)
+        sleep(2)
     except: pass
 
     options = ChromeOptions()
@@ -199,13 +201,36 @@ def initialize_driver_instance():
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-popup-blocking")
+    options.add_argument("--disable-gpu")
+    options.add_argument("--disable-extensions")
+    options.add_argument("--disable-software-rasterizer")
+    options.add_argument("--disable-background-networking")
+    options.add_argument("--disable-default-apps")
+    options.add_argument("--disable-sync")
+    options.add_argument("--metrics-recording-only")
+    options.add_argument("--no-first-run")
+    options.add_argument("--mute-audio")
+    options.add_argument("--disable-translate")
+    options.add_argument("--disable-background-timer-throttling")
+    options.add_argument("--disable-renderer-backgrounding")
+    options.add_argument("--disable-client-side-phishing-detection")
+    options.add_argument("--disable-component-update")
+    options.add_argument("--disable-domain-reliability")
+    options.add_argument("--disable-features=TranslateUI")
+    options.add_argument("--disable-hang-monitor")
+    options.add_argument("--disable-ipc-flooding-protection")
+    options.add_argument("--disable-prompt-on-repost")
+    options.add_argument("--disable-wake-on-wifi")
+    options.add_argument("--memory-pressure-off")
+    options.add_argument("--max_old_space_size=256")
     
-    options.add_argument("--window-size=1920,1080")
+    options.add_argument("--window-size=1280,720")
     options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
     options.add_argument("--disable-blink-features=AutomationControlled")
 
     try:
-        driver = uc.Chrome(options=options, version_main=148)
+        print(f"[{nome_jogo}] Iniciando Chrome UC...")
+        driver = uc.Chrome(options=options, version_main=148, use_subprocess=False)
         
         stealth(driver,
             languages=["pt-BR", "pt"],
@@ -215,9 +240,10 @@ def initialize_driver_instance():
             renderer="Intel Iris OpenGL Engine",
             fix_hairline=True,
         )
+        print(f"[{nome_jogo}] Chrome UC iniciado com sucesso.")
         return driver
     except Exception as e:
-        print(f"⚠️ Erro ao instalar/iniciar driver: {e}")
+        print(f"⚠️ [{nome_jogo}] Erro ao instalar/iniciar driver: {e}")
         return None
 
 def setup_navegador_unico(driver, url_jogo, nome_jogo):
@@ -227,6 +253,7 @@ def setup_navegador_unico(driver, url_jogo, nome_jogo):
     """
     print(f"➡️ Configurando {nome_jogo} em navegador dedicado...")
     try:
+        print(f"[{nome_jogo}] Acessando site principal...")
         driver.get(URL_DO_SITE)
         sleep(12)
         
@@ -240,12 +267,15 @@ def setup_navegador_unico(driver, url_jogo, nome_jogo):
         print(f"👉 [{nome_jogo}] Botão 'Entrar' clicado via JS.")
         sleep(4)
         
+        print(f"[{nome_jogo}] Preenchendo credenciais...")
         input_email = WebDriverWait(driver, 10).until(
             EC.visibility_of_element_located((By.XPATH, "//input[@id='email' or @name='email']"))
         )
+        input_email.clear()
         input_email.send_keys(EMAIL)
         
         input_pass = driver.find_element(By.XPATH, "//input[@id='password' or @name='password']")
+        input_pass.clear()
         input_pass.send_keys(PASSWORD)
         
         botao_submit = driver.find_element(By.XPATH, "//button[@type='submit']")
@@ -254,22 +284,33 @@ def setup_navegador_unico(driver, url_jogo, nome_jogo):
         print(f"✅ [{nome_jogo}] Formulário de login enviado.")
         sleep(12)
         
+        print(f"[{nome_jogo}] Acessando jogo: {url_jogo}")
         driver.get(url_jogo)
         sleep(12)
         
-        for retry in range(3):
+        print(f"[{nome_jogo}] Verificando iframe do jogo...")
+        for retry in range(5):
             if driver.find_elements(By.XPATH, '//iframe[contains(@src, "spribe") or contains(@src, "aviator")]'):
+                print(f"✅ [{nome_jogo}] Iframe encontrado.")
                 break
-            print(f"⏳ [{nome_jogo}] Aguardando iframe... (tentativa {retry+1}/3)")
-            sleep(5)
+            print(f"⏳ [{nome_jogo}] Aguardando iframe... (tentativa {retry+1}/5)")
+            sleep(3)
+        else:
+            print(f"⚠️ [{nome_jogo}] Iframe não encontrado após 5 tentativas, mas continuando...")
         
-        print(f"✅ [{nome_jogo}] Navegador dedicado configurado.")
+        driver.save_screenshot(f"{nome_jogo.replace(' ', '_')}_aberto.png")
+        print(f"📸 [{nome_jogo}] Screenshot salvo.")
+        
+        print(f"✅ [{nome_jogo}] Navegador dedicado configurado com sucesso.")
         return driver
         
     except Exception as e:
-        print(f"❌ ERRO CRÍTICO NAS ETAPAS DE LOGIN/ABERTURA [{nome_jogo}]: {e}")
+        erro_msg = f"❌ ERRO CRÍTICO NAS ETAPAS DE LOGIN/ABERTURA [{nome_jogo}]: {e}"
+        print(erro_msg)
+        print(f"[{nome_jogo}] Stacktrace: {traceback.format_exc()}")
         try:
             driver.save_screenshot(f"erro_login_{nome_jogo.replace(' ', '_')}.png")
+            print(f"📸 [{nome_jogo}] Screenshot de erro salvo.")
         except: pass
         return None
 
@@ -330,7 +371,7 @@ def start_bot(driver, firebase_path, nome_jogo):
             if clean_text:
                 try:
                     novo_valor = float(clean_text)
-                    if primeiro_valor or novo_valor != LAST_SENT:
+                    if primeira_execucao or novo_valor != LAST_SENT:
                         payload = {
                             "multiplier": f"{novo_valor:.2f}",
                             "time": now_br.strftime("%H:%M:%S"),
@@ -342,10 +383,10 @@ def start_bot(driver, firebase_path, nome_jogo):
                         print(f"🔥 [{nome_jogo}] {payload['multiplier']}x")
                         LAST_SENT = novo_valor
                         ULTIMO_MULTIPLIER_TIME = time()
-                        primeiro_valor = False
+                        primeira_execucao = False
                 except: pass
         else:
-            primeiro_valor = True
+            primeira_execucao = True
 
         if (time() - ULTIMO_MULTIPLIER_TIME) > TEMPO_MAX_INATIVIDADE:
             print(f"⚠️ [{nome_jogo}] Sem dados por {TEMPO_MAX_INATIVIDADE}s. Reiniciando...")
@@ -376,7 +417,7 @@ def rodar_ciclo_monitoramento():
     
     try:
         print("\n🔵 INICIANDO NAVEGADOR 1 - AVIATOR 1...")
-        driver1 = initialize_driver_instance()
+        driver1 = initialize_driver_instance("Aviator 1")
         if not driver1:
             print("⚠️ Falha ao instanciar driver 1.")
             return
@@ -385,25 +426,31 @@ def rodar_ciclo_monitoramento():
         if not resultado1:
             print("⚠️ Falha ao configurar Aviator 1.")
             if driver1:
-                driver1.quit()
+                try: driver1.quit()
+                except: pass
             return
         driver1 = resultado1
         
+        sleep(3)
+        
         print("\n🔵 INICIANDO NAVEGADOR 2 - AVIATOR 2 (VIP)...")
-        driver2 = initialize_driver_instance()
+        driver2 = initialize_driver_instance("Aviator 2")
         if not driver2:
             print("⚠️ Falha ao instanciar driver 2.")
             if driver1:
-                driver1.quit()
+                try: driver1.quit()
+                except: pass
             return
         
         resultado2 = setup_navegador_unico(driver2, LINK_AVIATOR_2, "Aviator 2")
         if not resultado2:
             print("⚠️ Falha ao configurar Aviator 2.")
             if driver1:
-                driver1.quit()
+                try: driver1.quit()
+                except: pass
             if driver2:
-                driver2.quit()
+                try: driver2.quit()
+                except: pass
             return
         driver2 = resultado2
         
@@ -425,6 +472,10 @@ def rodar_ciclo_monitoramento():
     except Exception as e:
         print(f"\n❌ ERRO NO CICLO: {e}")
         traceback.print_exc()
+        try:
+            if driver1: driver1.save_screenshot("erro_ciclo_driver1.png")
+            if driver2: driver2.save_screenshot("erro_ciclo_driver2.png")
+        except: pass
     finally:
         STOP_EVENT.set() 
         if driver1:
