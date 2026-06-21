@@ -281,15 +281,18 @@ def setup_tabs(driver):
         
         driver.switch_to.window(handle_aviator2)
         driver.get(LINK_AVIATOR_2)
-        sleep(12)
+        sleep(15)
         
         # Retry: tenta localizar iframe várias vezes
         print(f"🔍 [DEBUG] URL Aviator 2: {driver.current_url}")
-        for retry in range(3):
+        for retry in range(5):
             if driver.find_elements(By.XPATH, '//iframe[contains(@src, "spribe") or contains(@src, "aviator")]'):
                 break
-            print(f"⏳ Aguardando iframe Aviator 2... (tentativa {retry+1}/3)")
-            sleep(5)
+            print(f"⏳ Aguardando iframe Aviator 2... (tentativa {retry+1}/5)")
+            sleep(4)
+        
+        driver.save_screenshot("aviator2_inicial.png")
+        print("📸 Screenshot Aviator 2 salvo.")
         
         print(f"✅ Aba Aviator 2 configurada.")
         driver.switch_to.window(handle_original)
@@ -343,15 +346,29 @@ def start_bot(driver, game_handle, firebase_path):
                 contador_debug += 1
                 iframe, hist_element = find_game_elements_safe(driver)
                 
-                if iframe:
+                if not iframe:
+                    if nome_log == "AVIATOR 2" and contador_debug % 30 == 0:
+                        print(f"⚠️ [{nome_log}] Iframe NÃO encontrado na página.")
+                else:
                     checar_e_aceitar_cookies_iframe(driver, {'aceito': False})
                 
-                if hist_element:
-                    first_payout = hist_element.find_element(
-                        By.CSS_SELECTOR, ".payout:first-child, .bubble-multiplier:first-child"
-                    )
-                    raw_text = first_payout.get_attribute("innerText")
+                if not hist_element:
+                    if nome_log == "AVIATOR 2" and contador_debug % 30 == 0:
+                        print(f"⚠️ [{nome_log}] Elemento histórico NÃO encontrado dentro do iframe.")
+                else:
+                    try:
+                        first_payout = hist_element.find_element(
+                            By.CSS_SELECTOR, ".payout:first-child, .bubble-multiplier:first-child"
+                        )
+                        raw_text = first_payout.get_attribute("innerText")
+                        if not raw_text and nome_log == "AVIATOR 2" and contador_debug % 30 == 0:
+                            print(f"⚠️ [{nome_log}] first_payout encontrado mas innerText vazio.")
+                    except Exception as e:
+                        if nome_log == "AVIATOR 2" and contador_debug % 30 == 0:
+                            print(f"⚠️ [{nome_log}] Erro ao buscar first_payout: {e}")
             except Exception as e:
+                if nome_log == "AVIATOR 2" and contador_debug % 30 == 0:
+                    print(f"⚠️ [{nome_log}] Exceção no loop: {e}")
                 pass
         
         if raw_text:
