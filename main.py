@@ -277,13 +277,20 @@ def setup_tabs(driver):
         driver.save_screenshot("aviator1_inicial.png")
 
         print("🎯 Configurando Aviator 2 (VIP)...")
-        driver.execute_script("window.open('');")
+        try:
+            driver.switch_to.new_window('tab')
+            sleep(1)
+        except Exception as e:
+            print(f"⚠️ Erro abrir aba: {e}")
         handles = driver.window_handles
         handle_aviator2 = [h for h in handles if h != handle_original][0]
         
-        driver.switch_to.window(handle_aviator2)
-        driver.get(LINK_AVIATOR_2)
-        sleep(20)
+        try:
+            driver.switch_to.window(handle_aviator2)
+            driver.get(LINK_AVIATOR_2)
+            sleep(20)
+        except Exception as e:
+            print(f"⚠️ Erro navegar Aviator 2: {e}")
         
         print(f"🔗 Aviator 2 URL: {driver.current_url}")
         driver.save_screenshot("aviator2_inicial.png")
