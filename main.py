@@ -280,7 +280,7 @@ def setup_tabs(driver):
         handle_aviator2 = [h for h in handles if h != handle_original][0]
         
         driver.switch_to.window(handle_aviator2)
-        driver.get(URL_DO_SITE)
+        driver.get(LINK_AVIATOR_2)
         sleep(6)
         
         try:
@@ -310,11 +310,14 @@ def find_game_elements_safe(driver):
     try:
         driver.implicitly_wait(2)
         iframe = driver.find_element(By.XPATH, '//iframe[contains(@src, "spribe") or contains(@src, "aviator")]')
+        print(f"🔍 Iframe encontrado: {iframe.get_attribute('src')[:80] if iframe.get_attribute('src') else 'sem src'}")
         driver.switch_to.frame(iframe)
         hist = driver.find_element(By.CSS_SELECTOR, "app-stats-widget, .payouts-block")
+        print(f"🔍 Elemento histórico encontrado")
         driver.implicitly_wait(10)
         return iframe, hist
-    except:
+    except Exception as e:
+        print(f"⚠️ Erro ao encontrar elementos do jogo: {e}")
         driver.implicitly_wait(10)
         return None, None
 
@@ -330,7 +333,7 @@ def start_bot(driver, game_handle, firebase_path):
     
     estado_cookies = {'aceito': False}
 
-    while not STOP_EVENT.is_set():
+while not STOP_EVENT.is_set():
         raw_text = None
         with DRIVER_LOCK:
             if STOP_EVENT.is_set(): break
@@ -348,8 +351,10 @@ def start_bot(driver, game_handle, firebase_path):
                         "[appcoloredmultiplier].payout:first-child, .payout:first-child, .bubble-multiplier:first-child"
                     )
                     raw_text = first_payout.get_attribute("innerText")
-            except: pass
-
+                    print(f"[DEBUG] raw_text coletado: '{raw_text}'")
+            except Exception as e:
+                print(f"[DEBUG] Erro ao coletar payout: {e}")
+        
         if raw_text:
             clean_text = raw_text.strip().lower().replace('x', '').replace('\n', '').strip()
             if clean_text:
@@ -368,12 +373,12 @@ def start_bot(driver, game_handle, firebase_path):
                         
                         LAST_SENT = novo_valor
                         ULTIMO_MULTIPLIER_TIME = time()
-                except: pass 
+                except: pass
 
         if (time() - ULTIMO_MULTIPLIER_TIME) > TEMPO_MAX_INATIVIDADE:
             print(f"⚠️ [{nome_log}] Sem dados por mais de {TEMPO_MAX_INATIVIDADE}s. Reiniciando...")
             STOP_EVENT.set()
-            return 
+            return
             
         sleep(POLLING_INTERVAL + 0.5)
 
