@@ -11,12 +11,15 @@ import glob
 from time import sleep, time
 from datetime import datetime
 
+# 🔥 SELENIUM PADRÃO E CONFIGURAÇÕES DE SERVIÇO
+from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
+from webdriver_manager.chrome import ChromeDriverManager
 
-# 🔥 BIBLIOTECA DE CAMUFLAGEM
-import undetected_chromedriver as uc
+# 🛡️ BIBLIOTECA DE OCULTAÇÃO DE AUTOMAÇÃO
 from selenium_stealth import stealth
 
 import firebase_admin
@@ -66,7 +69,6 @@ TZ_BR = pytz.timezone("America/Sao_Paulo")
 def run_diagnostics():
     print("\n--- 🕵️ DIAGNÓSTICO DE CONEXÃO ---")
     try:
-        # Apenas pega o IP para evitar gerar bloco 429 no site alvo via requests puro
         ip = requests.get('https://api.ipify.org', timeout=10).text
         print(f"🌐 IP Público da Hospedagem: {ip}")
     except Exception as e:
@@ -141,7 +143,7 @@ def stealth_script_inject(driver):
         print(f"Aviso ao injetar stealth script: {e}")
 
 # =============================================================
-# 🚀 DRIVER COM UNDETECTED-CHROMEDRIVER
+# 🚀 DRIVER COM SELENIUM PADRÃO + ANTIBOT FLAGS
 # =============================================================
 def initialize_driver_instance():
     try:
@@ -152,21 +154,29 @@ def initialize_driver_instance():
             subprocess.run("killall -9 chromium-browser chromium chromedriver 2>/dev/null", shell=True)
     except: pass
 
-    options = uc.ChromeOptions()
+    options = webdriver.ChromeOptions()
     options.page_load_strategy = 'eager'
     
+    # Flags de performance e Headless estável para Linux/Square Cloud
     options.add_argument("--headless=new")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--disable-gpu")
     options.add_argument("--disable-popup-blocking")
-    
     options.add_argument("--window-size=1920,1080")
+    
+    # Forçar User-Agent real e remover traços de automação nativamente
     options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
     options.add_argument("--disable-blink-features=AutomationControlled")
+    options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    options.add_experimental_option('useAutomationExtension', False)
 
     try:
-        driver = uc.Chrome(options=options, version_main=148)
+        # Gerencia e instala automaticamente a versão correta do Chromedriver
+        service = Service(ChromeDriverManager().install())
+        driver = webdriver.Chrome(service=service, options=options)
         
+        # Aplica a camuflagem stealth por cima do driver padrão
         stealth(driver,
             languages=["pt-BR", "pt"],
             vendor="Google Inc.",
@@ -177,7 +187,7 @@ def initialize_driver_instance():
         )
         return driver
     except Exception as e:
-        print(f"⚠️ Erro ao instalar/iniciar driver: {e}")
+        print(f"⚠️ Erro ao instalar/iniciar driver padrão: {e}")
         return None
 
 def setup_tabs(driver):
@@ -259,8 +269,9 @@ def setup_tabs(driver):
 
         print("🎯 Configurando Aviator 2 VIP (Nova Aba)...")
         driver.execute_script("window.open('');")
+        sleep(2)
         handles = driver.window_handles
-        handle_aviator2 = [h for h in handles if h != handle_original][0]
+        handle_aviator2 = handles[-1] # Garante foco na aba recém-criada
         
         driver.switch_to.window(handle_aviator2)
         driver.get(LINK_AVIATOR_2)
@@ -317,7 +328,7 @@ def find_game_elements_safe(driver):
         return None, None
 
 # =============================================================
-# 🔄 LOOP DE CAPTURA LIMPO (SEM FLOOD DE COOKIES)
+# 🔄 LOOP DE CAPTURA LIMPO
 # =============================================================
 def start_bot(driver, game_handle, firebase_path):
     nome_log = "AVIATOR 1" if "history" in firebase_path else "AVIATOR 2"
@@ -386,7 +397,7 @@ def rodar_ciclo_monitoramento():
     limpar_pngs_antigos()
     
     try:
-        print("\n🔵 INICIANDO NOVO CICLO COM UNDETECTED-CHROMEDRIVER...")
+        print("\n🔵 INICIANDO NOVO CICLO COM CHROMEDRIVER PADRÃO + STEALTH...")
         DRIVER = initialize_driver_instance()
         
         if not DRIVER:
