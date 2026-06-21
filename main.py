@@ -16,6 +16,7 @@ from selenium import webdriver
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
+from selenium.common.exceptions import TimeoutException
 
 # 🛡️ BIBLIOTECA DE OCULTAÇÃO DE AUTOMAÇÃO
 from selenium_stealth import stealth
@@ -67,18 +68,11 @@ TZ_BR = pytz.timezone("America/Sao_Paulo")
 def run_diagnostics():
     print("\n--- 🕵️ DIAGNÓSTICO DE CONEXÃO ---")
     try:
-        # Obtém o IP público da hospedagem
+        # Obtém apenas o IP público para monitoramento, sem tocar no site alvo
         ip = requests.get('https://api.ipify.org', timeout=10).text
         print(f"🌐 IP Público da Hospedagem: {ip}")
-        
-        # Simula um navegador real para monitorar o status com segurança
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
-        }
-        status = requests.get(URL_DO_SITE, headers=headers, timeout=10).status_code
-        print(f"📡 Status Site (Requests camuflado): {status}")
     except Exception as e:
-        print(f"⚠️ Alerta de Rede/Status: {e}")
+        print(f"⚠️ Alerta de Rede: {e}")
     print("----------------------------------\n")
 
 def limpar_pngs_antigos():
@@ -115,7 +109,7 @@ def enviar_firebase_async(path, data):
 
 def verificar_modais_bloqueio(driver):
     try:
-        btn_cookies = driver.find_element(By.開PATH, "//button[contains(text(), 'ACEITAR TODOS') or contains(., 'ACEITAR TODOS')]")
+        btn_cookies = driver.find_element(By.XPATH, "//button[contains(text(), 'ACEITAR TODOS') or contains(., 'ACEITAR TODOS')]")
         driver.execute_script("arguments[0].click();", btn_cookies)
         print("✅ Banner de Cookies geral aceito.")
         sleep(1)
@@ -163,7 +157,6 @@ def initialize_driver_instance():
     options = webdriver.ChromeOptions()
     options.page_load_strategy = 'eager'
     
-    # Aponta para o binário Chromium estável do servidor Linux da Square
     if os.name != 'nt':
         options.binary_location = "/usr/bin/chromium"
     
@@ -180,7 +173,6 @@ def initialize_driver_instance():
     options.add_experimental_option('useAutomationExtension', False)
 
     try:
-        # Selenium Manager resolve nativamente a versão correta do driver para o binário v148
         driver = webdriver.Chrome(options=options)
         
         stealth(driver,
@@ -206,10 +198,17 @@ def setup_tabs(driver):
         
         verificar_modais_bloqueio(driver)
 
-        botao_entrar = WebDriverWait(driver, 15).until(
-            EC.presence_of_element_located((By.XPATH, "//button[contains(., 'Entrar')] | //a[contains(., 'Entrar')] | //*[text()='Entrar']"))
-        )
-        
+        # Captura o botão entrar tratando especificamente falhas de carregamento/bloqueios
+        try:
+            botao_entrar = WebDriverWait(driver, 15).until(
+                EC.presence_of_element_located((By.XPATH, "//button[contains(., 'Entrar')] | //a[contains(., 'Entrar')] | //*[text()='Entrar']"))
+            )
+        except TimeoutException:
+            print("❌ TELA BLOQUEADA: O botão 'Entrar' não carregou. O site pode estar exibindo o desafio Cloudflare ou erro 429.")
+            try: driver.save_screenshot("erro_login.png")
+            except: pass
+            return None
+
         driver.execute_script("arguments[0].click();", botao_entrar)
         print("👉 Botão 'Entrar' clicado via JS com sucesso.")
         sleep(4)
@@ -234,7 +233,7 @@ def setup_tabs(driver):
         return None
 
     # =============================================================
-    # 🔄 DIRECIONAMENTO E LIMPEZA DE COOKIES NAS ABAS DOS JOGOS
+    # 🔄 DIRECIONAMENTO NAS ABAS DOS JOGOS
     # =============================================================
     try:
         print("🎯 Configurando Aviator 1 (Aba Principal)...")
@@ -250,7 +249,6 @@ def setup_tabs(driver):
         sleep(12) 
         handle_original = driver.current_window_handle
 
-        # [COOKIES APÓS LOGIN - AVIATOR 1]
         try:
             if driver.find_elements(By.XPATH, '//iframe[contains(@src, "spribe") or contains(@src, "aviator")]'):
                 iframe = driver.find_element(By.XPATH, '//iframe[contains(@src, "spribe") or contains(@src, "aviator")]')
@@ -264,7 +262,6 @@ def setup_tabs(driver):
                 driver.switch_to.default_content()
         except: pass
 
-        # [📸 PRINT SELEÇÃO AVIATOR 1]
         try:
             driver.save_screenshot("aviator1_aberto.png")
             print("📸 [Print] Imagem 'aviator1_aberto.png' salva com sucesso.")
@@ -289,7 +286,6 @@ def setup_tabs(driver):
             print(f"⏳ Aguardando iframe Aviator 2... (tentativa {retry+1}/3)")
             sleep(5)
             
-        # [COOKIES APÓS LOGIN - AVIATOR 2]
         try:
             if driver.find_elements(By.XPATH, '//iframe[contains(@src, "spribe") or contains(@src, "aviator")]'):
                 iframe = driver.find_element(By.XPATH, '//iframe[contains(@src, "spribe") or contains(@src, "aviator")]')
@@ -303,7 +299,6 @@ def setup_tabs(driver):
                 driver.switch_to.default_content()
         except: pass
 
-        # [📸 PRINT SELEÇÃO AVIATOR 2]
         try:
             driver.save_screenshot("aviator2_aberto.png")
             print("📸 [Print] Imagem 'aviator2_aberto.png' salva com sucesso.")
