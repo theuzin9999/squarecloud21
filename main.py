@@ -48,7 +48,7 @@ except Exception as e:
 # =============================================================
 URL_DO_SITE = "https://www.goathbet.com"
 LINK_AVIATOR_ORIGINAL = "https://www.goathbet.com/pt/casino/spribe/aviator"
-LINK_AVIATOR_2 = "https://www.goathbet.com/pt/casino/spribe/aviator-2"
+LINK_AVIATOR_2 = "https://www.goathbet.com/casino/spribe/aviator-vip"
 
 FIREBASE_PATH_ORIGINAL = "history"
 FIREBASE_PATH_2 = "aviator2"
